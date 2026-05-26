@@ -23,7 +23,7 @@ const val GRAPH_BODY_CONTENT_TYPE_TEXT = "Text"
 
 // Attachments at or below this threshold are embedded inline (base64) in the sendMail JSON body.
 // Larger files use the upload-session flow (create draft → chunked PUT → send).
-const val INLINE_ATTACHMENT_THRESHOLD_BYTES = 3L * 1024L * 1024L
+const val INLINE_ATTACHMENT_THRESHOLD_BYTES = 2L * 1024L * 1024L
 
 // Hard limits enforced before any API call — raised to 25 MB now that upload sessions are supported.
 const val MAX_SINGLE_ATTACHMENT_BYTES = 25L * 1024L * 1024L

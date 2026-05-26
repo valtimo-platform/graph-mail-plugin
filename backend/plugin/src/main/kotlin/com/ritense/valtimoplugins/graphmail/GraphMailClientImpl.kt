@@ -331,14 +331,39 @@ class GraphMailClientImpl(
         val draftId = createDraftWithRetry(tenantId, clientId, clientSecret, senderMailbox, draftMessage, deadline)
         logger.debug("Draft created id={}", draftId)
 
-        for (attachment in attachments) {
-            val uploadUrl = createUploadSession(tenantId, clientId, clientSecret,
-                senderMailbox, draftId, attachment, deadline)
-            uploadInChunks(uploadUrl, attachment, deadline)
-            logger.debug("Attachment uploaded: name='{}' size={}", attachment.name, attachment.sizeBytes)
+        try {
+            for (attachment in attachments) {
+                val uploadUrl = createUploadSession(tenantId, clientId, clientSecret,
+                    senderMailbox, draftId, attachment, deadline)
+                uploadInChunks(uploadUrl, attachment, deadline)
+                logger.debug("Attachment uploaded: name='{}' size={}", attachment.name, attachment.sizeBytes)
+            }
+            sendDraftWithRetry(tenantId, clientId, clientSecret, senderMailbox, draftId, deadline)
+        } catch (ex: Exception) {
+            deleteDraftBestEffort(tenantId, clientId, clientSecret, senderMailbox, draftId)
+            throw ex
         }
+    }
 
-        sendDraftWithRetry(tenantId, clientId, clientSecret, senderMailbox, draftId, deadline)
+    private fun deleteDraftBestEffort(
+        tenantId: String,
+        clientId: String,
+        clientSecret: String,
+        senderMailbox: String,
+        draftId: String,
+    ) {
+        try {
+            val uri: URI = UriComponentsBuilder
+                .fromUriString("$graphBaseUrl/v1.0/users/{mailbox}/messages/{id}")
+                .buildAndExpand(senderMailbox, draftId)
+                .toUri()
+            val token = getAccessToken(tenantId, clientId, clientSecret)
+            val headers = HttpHeaders().apply { setBearerAuth(token) }
+            restTemplate.exchange(uri, HttpMethod.DELETE, HttpEntity<Void>(headers), Void::class.java)
+            logger.debug("Orphaned draft deleted id={}", draftId)
+        } catch (ex: Exception) {
+            logger.warn("Failed to delete orphaned draft id={}: {}", draftId, ex.message)
+        }
     }
 
     private fun createDraftWithRetry(
@@ -418,11 +443,6 @@ class GraphMailClientImpl(
             .buildAndExpand(senderMailbox, draftId)
             .toUri()
 
-        val token = getAccessToken(tenantId, clientId, clientSecret)
-        val headers = HttpHeaders().apply {
-            setBearerAuth(token)
-            contentType = MediaType.APPLICATION_JSON
-        }
         val body = CreateUploadSessionRequest(
             attachmentItem = UploadAttachmentItem(
                 name = attachment.name,
@@ -434,14 +454,33 @@ class GraphMailClientImpl(
         if (System.currentTimeMillis() > deadline)
             throw GraphMailException("Upload session creation timed out after ${MAX_DRAFT_SEND_WALL_CLOCK_MS}ms")
 
+        var tokenRefreshed = false
         val resp = try {
+            val token = getAccessToken(tenantId, clientId, clientSecret)
+            val headers = HttpHeaders().apply {
+                setBearerAuth(token)
+                contentType = MediaType.APPLICATION_JSON
+            }
             restTemplate.exchange(uri, HttpMethod.POST, HttpEntity(body, headers),
                 UploadSessionResponse::class.java)
         } catch (ex: HttpClientErrorException) {
-            throw GraphMailException(
-                "Graph API rejected upload session creation (${ex.statusCode})", ex,
-                statusCode = ex.statusCode.value())
+            if (ex.statusCode.value() == 401 && !tokenRefreshed) {
+                tokenRefreshed = true
+                invalidateCache(tenantId, clientId)
+                val token = getAccessToken(tenantId, clientId, clientSecret)
+                val headers = HttpHeaders().apply {
+                    setBearerAuth(token)
+                    contentType = MediaType.APPLICATION_JSON
+                }
+                restTemplate.exchange(uri, HttpMethod.POST, HttpEntity(body, headers),
+                    UploadSessionResponse::class.java)
+            } else {
+                throw GraphMailException(
+                    "Graph API rejected upload session creation (${ex.statusCode})", ex,
+                    statusCode = ex.statusCode.value())
+            }
         }
+
         val uploadUrl = resp.body?.uploadUrl
             ?: throw GraphMailException("Empty uploadUrl in upload session response")
         // Derive expected scheme+host from graphBaseUrl so WireMock tests (http://localhost)
@@ -450,8 +489,9 @@ class GraphMailClientImpl(
         val expectedHost  = runCatching { java.net.URI.create(graphBaseUrl).host  }.getOrElse { "graph.microsoft.com" }
         val actualScheme  = runCatching { java.net.URI.create(uploadUrl).scheme   }.getOrNull()
         val actualHost    = runCatching { java.net.URI.create(uploadUrl).host     }.getOrNull()
+        val microsoftHosts = listOf(".microsoft.com", ".office.com", ".office.net")
         require(actualScheme == expectedScheme &&
-            (actualHost == expectedHost || actualHost?.endsWith(".microsoft.com") == true)) {
+            (actualHost == expectedHost || microsoftHosts.any { actualHost?.endsWith(it) == true })) {
             "Upload URL from Graph API failed domain validation"
         }
         return uploadUrl
