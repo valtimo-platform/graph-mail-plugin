@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Ritense BV, the Netherlands.
+ * Copyright 2015-2025 Ritense BV, the Netherlands.
  *
  * Licensed under EUPL, Version 1.2 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package com.ritense.valtimoplugins.graphmail
 
-export * from './lib/graph-mail.module';
-export * from './lib/graph-mail.plugin.specification';
-export * from './lib/models';
+data class GraphMailTestSendRequest(
+    val pluginConfigurationId: String,
+    val recipient: String,
+    val senderMailbox: String,
+)

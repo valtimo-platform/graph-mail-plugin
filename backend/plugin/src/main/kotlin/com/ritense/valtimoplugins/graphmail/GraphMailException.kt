@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Ritense BV, the Netherlands.
+ * Copyright 2015-2025 Ritense BV, the Netherlands.
  *
  * Licensed under EUPL, Version 1.2 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,15 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package com.ritense.valtimoplugins.graphmail
 
-package com.ritense.valtimoplugins.sampleplugin
-
-import org.springframework.boot.autoconfigure.SpringBootApplication
-import org.springframework.boot.runApplication
-
-@SpringBootApplication
-class TestApplication
-
-fun main(args: Array<String>) {
-    runApplication<TestApplication>(*args)
-}
+open class GraphMailException(
+    message: String,
+    cause: Throwable? = null,
+    val statusCode: Int = 500,
+) : RuntimeException(message, cause)

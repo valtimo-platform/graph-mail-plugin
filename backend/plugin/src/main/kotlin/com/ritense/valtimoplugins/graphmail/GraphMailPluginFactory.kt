@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Ritense BV, the Netherlands.
+ * Copyright 2015-2025 Ritense BV, the Netherlands.
  *
  * Licensed under EUPL, Version 1.2 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,22 +13,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-package com.ritense.valtimoplugins.sampleplugin.plugin
+package com.ritense.valtimoplugins.graphmail
 
 import com.ritense.plugin.PluginFactory
 import com.ritense.plugin.service.PluginService
-import com.ritense.valtimoplugins.sampleplugin.client.SampleService
-import org.springframework.stereotype.Component
+import com.ritense.resource.service.TemporaryResourceStorageService
+import org.springframework.context.ApplicationEventPublisher
 
-/**
- * Factory class to create instances of the SamplePlugin.
- * This is required for the plugin framework to instantiate the plugin.
- */
-@Component
-class SamplePluginFactory(
+class GraphMailPluginFactory(
     pluginService: PluginService,
-    val sampleService: SampleService,
-) : PluginFactory<SamplePlugin>(pluginService) {
-    override fun create(): SamplePlugin = SamplePlugin(sampleService)
+    private val graphMailClient: GraphMailClient,
+    private val resourceStorageService: TemporaryResourceStorageService,
+    private val eventPublisher: ApplicationEventPublisher,
+) : PluginFactory<GraphMailPlugin>(pluginService) {
+
+    override fun create(): GraphMailPlugin = GraphMailPlugin(graphMailClient, resourceStorageService, eventPublisher)
 }

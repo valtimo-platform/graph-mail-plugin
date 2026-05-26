@@ -1,0 +1,89 @@
+<v-form
+  (valueChange)="formValueChange($event)"
+  *ngIf="{
+    disabled: disabled$ | async,
+    prefill: prefillConfiguration$ ? (prefillConfiguration$ | async) : null
+  } as obs"
+>
+  <!-- Verzender -->
+  <v-input
+    name="senderMailbox"
+    [title]="'senderMailbox' | pluginTranslate: pluginId | async"
+    [margin]="true"
+    [defaultValue]="obs.prefill?.senderMailbox"
+    [disabled]="obs.disabled"
+    [required]="true"
+    [placeholder]="'pv:senderMailbox'"
+  ></v-input>
+
+  <!-- Ontvangers -->
+  <v-input
+    name="recipients"
+    [title]="'recipients' | pluginTranslate: pluginId | async"
+    [margin]="true"
+    [defaultValue]="obs.prefill?.recipients"
+    [disabled]="obs.disabled"
+    [required]="true"
+    [placeholder]="'pv:recipients'"
+  ></v-input>
+
+  <v-input
+    name="cc"
+    [title]="'cc' | pluginTranslate: pluginId | async"
+    [margin]="true"
+    [defaultValue]="obs.prefill?.cc"
+    [disabled]="obs.disabled"
+    [placeholder]="'pv:cc'"
+  ></v-input>
+
+  <v-input
+    name="bcc"
+    [title]="'bcc' | pluginTranslate: pluginId | async"
+    [margin]="true"
+    [defaultValue]="obs.prefill?.bcc"
+    [disabled]="obs.disabled"
+    [placeholder]="'pv:bcc'"
+  ></v-input>
+
+  <v-input
+    name="replyTo"
+    [title]="'replyTo' | pluginTranslate: pluginId | async"
+    [margin]="true"
+    [defaultValue]="obs.prefill?.replyTo"
+    [disabled]="obs.disabled"
+    [placeholder]="'pv:replyTo'"
+  ></v-input>
+
+  <!-- Inhoud -->
+  <v-input
+    name="subject"
+    [title]="'subject' | pluginTranslate: pluginId | async"
+    [margin]="true"
+    [defaultValue]="obs.prefill?.subject"
+    [disabled]="obs.disabled"
+    [required]="true"
+    [placeholder]="'pv:subject'"
+  ></v-input>
+
+  <v-input
+    name="contentId"
+    [title]="'contentId' | pluginTranslate: pluginId | async"
+    [margin]="true"
+    [defaultValue]="obs.prefill?.contentId"
+    [disabled]="obs.disabled"
+    [required]="true"
+    [placeholder]="'pv:contentId'"
+    [tooltip]="'contentIdTooltip' | pluginTranslate: pluginId | async"
+  ></v-input>
+
+  <!-- Bijlagen -->
+  <v-input
+    name="attachmentIds"
+    [title]="'attachmentIds' | pluginTranslate: pluginId | async"
+    [margin]="true"
+    [defaultValue]="obs.prefill?.attachmentIds"
+    [disabled]="obs.disabled"
+    [placeholder]="'pv:attachmentIds'"
+    [tooltip]="'attachmentIdsTooltip' | pluginTranslate: pluginId | async"
+  ></v-input>
+</v-form>

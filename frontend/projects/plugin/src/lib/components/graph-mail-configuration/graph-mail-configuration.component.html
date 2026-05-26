@@ -1,0 +1,140 @@
+<ng-container *ngIf="{
+  disabled: disabled$ | async,
+  prefill: prefillConfiguration$ ? (prefillConfiguration$ | async) : null
+} as obs">
+
+  <v-form (valueChange)="formValueChange($event)">
+    <v-input
+      name="configurationTitle"
+      [title]="'configurationTitle' | pluginTranslate: pluginId | async"
+      [margin]="true"
+      [defaultValue]="obs.prefill?.configurationTitle"
+      [disabled]="obs.disabled"
+      [required]="true"
+    ></v-input>
+
+    <v-input
+      name="tenantId"
+      [title]="'tenantId' | pluginTranslate: pluginId | async"
+      [margin]="true"
+      [defaultValue]="obs.prefill?.tenantId"
+      [disabled]="obs.disabled"
+      [required]="true"
+    ></v-input>
+    <div
+      *ngIf="tenantIdInvalid"
+      style="margin: -10px 0 10px; font-size: 12px; color: #da1e28"
+    >
+      {{ 'tenantIdInvalidFormat' | pluginTranslate: pluginId | async }}
+    </div>
+
+    <v-input
+      name="clientId"
+      [title]="'clientId' | pluginTranslate: pluginId | async"
+      [margin]="true"
+      [defaultValue]="obs.prefill?.clientId"
+      [disabled]="obs.disabled"
+      [required]="true"
+    ></v-input>
+    <div
+      *ngIf="clientIdInvalid"
+      style="margin: -10px 0 10px; font-size: 12px; color: #da1e28"
+    >
+      {{ 'clientIdInvalidFormat' | pluginTranslate: pluginId | async }}
+    </div>
+
+  </v-form>
+
+  <!-- clientSecret outside v-form: native password input guarantees masking -->
+  <div style="margin-bottom: 16px">
+    <label style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin-bottom: 8px; letter-spacing: .16px">
+      {{ 'clientSecret' | pluginTranslate: pluginId | async }}
+    </label>
+    <input
+      type="password"
+      autocomplete="new-password"
+      [(ngModel)]="clientSecretValue"
+      (ngModelChange)="onSecretChange()"
+      [disabled]="!!obs.disabled"
+      [placeholder]="savedConfigurationId ? (('clientSecretPlaceholder' | pluginTranslate: pluginId | async) ?? '') : ''"
+      style="width: 100%; padding: 0 16px; border: none; border-bottom: 1px solid #8d8d8d;
+             background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box;
+             outline: none; font-family: inherit"
+    />
+  </div>
+
+  <!-- ── Testmail (zichtbaar zodra Tenant ID + Client ID + Client Secret zijn ingevuld) ── -->
+  <div
+    *ngIf="testSectionVisible"
+    style="margin-top: 28px; border: 1px solid #e0e0e0; border-radius: 6px; padding: 18px 20px"
+  >
+    <strong style="font-size: 14px; display: block; margin-bottom: 4px">{{ 'testMailTitle' | pluginTranslate: pluginId | async }}</strong>
+    <p style="font-size: 13px; color: #666; margin: 0 0 16px; line-height: 1.5">
+      {{ 'testMailDescription' | pluginTranslate: pluginId | async }}
+    </p>
+
+    <!-- Niet-opgeslagen configuratie: testmail werkt alleen na opslaan -->
+    <div
+      *ngIf="!savedConfigurationId"
+      style="margin-bottom: 14px; padding: 10px 14px; background: #edf5ff; border: 1px solid #0f62fe; border-radius: 4px; font-size: 13px; color: #002d9c"
+    >
+      &#x2139; {{ 'testMailSaveFirst' | pluginTranslate: pluginId | async }}
+    </div>
+
+    <!-- Afzender e-mailadres -->
+    <div style="margin-bottom: 14px">
+      <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px">
+        {{ 'testSenderMailbox' | pluginTranslate: pluginId | async }}
+      </label>
+      <input
+        type="email"
+        [(ngModel)]="testSenderMailbox"
+        [placeholder]="('senderMailboxPlaceholder' | pluginTranslate: pluginId | async) ?? ''"
+        style="width: 100%; padding: 8px 10px; border-radius: 4px; font-size: 14px; box-sizing: border-box"
+        [style.border]="testSenderInvalid ? '1px solid #da1e28' : '1px solid #ccc'"
+      />
+      <div *ngIf="testSenderInvalid" style="margin-top: 4px; font-size: 12px; color: #da1e28">
+        {{ 'invalidEmailAddress' | pluginTranslate: pluginId | async }}
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 10px; align-items: flex-end">
+      <div style="flex: 1">
+        <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px">
+          {{ 'testRecipientLabel' | pluginTranslate: pluginId | async }}
+        </label>
+        <input
+          type="email"
+          [(ngModel)]="testRecipient"
+          [placeholder]="('testRecipientPlaceholder' | pluginTranslate: pluginId | async) ?? ''"
+          style="width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px;
+                 font-size: 14px; box-sizing: border-box"
+        />
+      </div>
+      <button
+        type="button"
+        (click)="sendTestEmail()"
+        [disabled]="!canSendTest"
+        style="padding: 9px 18px; background: #0f62fe; color: #fff; border: none;
+               border-radius: 4px; font-size: 14px; font-weight: 500; white-space: nowrap"
+        [style.opacity]="!canSendTest ? '0.5' : '1'"
+        [style.cursor]="!canSendTest ? 'not-allowed' : 'pointer'"
+      >{{ testLoading ? ('sending' | pluginTranslate: pluginId | async) : ('sendTestMail' | pluginTranslate: pluginId | async) }}</button>
+    </div>
+
+    <!-- Status -->
+    <div
+      *ngIf="testStatus !== null"
+      style="margin-top: 12px; padding: 12px 16px; border-radius: 4px; font-size: 14px; font-weight: 500; line-height: 1.4"
+      [style.background]="testStatus.success ? '#defbe6' : '#fff1f1'"
+      [style.border]="testStatus.success ? '1px solid #24a148' : '1px solid #da1e28'"
+      [style.color]="testStatus.success ? '#0e6027' : '#a2191f'"
+    >
+      {{ testStatus.success ? '✓' : '✗' }}&nbsp;<ng-container *ngIf="testStatus.isNetworkError">{{ 'connectionError' | pluginTranslate: pluginId | async }}&nbsp;</ng-container>{{ testStatus.message }}
+      <span *ngIf="!testStatus.success" style="font-weight: 400; font-size: 12px; opacity: 0.8">
+        &nbsp;(HTTP {{ testStatus.statusCode }})
+      </span>
+    </div>
+  </div>
+
+</ng-container>

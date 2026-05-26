@@ -1,0 +1,14 @@
+{
+  "name": "graph-mail",
+  "version": 1,
+  "backend": {
+    "maven": "com.ritense.valtimoplugins:graph-mail"
+  },
+  "frontend": {
+    "npm": "@valtimo-plugins/graph-mail",
+"codeAdditions": {
+  "graphMailPluginSpecification": "import { graphMailPluginSpecification } from '@valtimo-plugins/graph-mail';",
+  "GraphMailPluginModule": "import { GraphMailPluginModule } from '@valtimo-plugins/graph-mail';"
+}
+  }
+}

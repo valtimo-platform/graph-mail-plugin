@@ -29,9 +29,9 @@
             "@src/*": [
                 "src/*"
             ],
-            "@valtimo-plugins/sample-plugin": [
-                "projects/plugin/src/public_api.ts"
-            ]
+            "@valtimo-plugins/graph-mail": [
+    "projects/plugin/src/public_api.ts"
+]
         }
     },
     "include": [

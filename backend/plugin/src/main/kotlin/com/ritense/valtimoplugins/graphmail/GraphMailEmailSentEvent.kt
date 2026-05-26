@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Ritense BV, the Netherlands.
+ * Copyright 2015-2025 Ritense BV, the Netherlands.
  *
  * Licensed under EUPL, Version 1.2 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package com.ritense.valtimoplugins.graphmail
 
-package com.ritense.valtimoplugins.sampleplugin
-
-import org.junit.jupiter.api.Test
-
-internal class ApplicationStartIT : BaseIntegrationTest() {
-    @Test
-    fun `should start application`() {
-    }
-}
+data class GraphMailEmailSentEvent(
+    val senderMailbox: String,
+    val recipientCount: Int,
+    val ccCount: Int,
+    val bccCount: Int,
+    val attachmentCount: Int,
+    val durationMs: Long,
+)

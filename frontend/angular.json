@@ -147,7 +147,7 @@
                 }
             }
         },
-        "@valtimo-plugins/sample-plugin": {
+        "@valtimo-plugins/graph-mail": {
             "projectType": "library",
             "root": "projects/plugin",
             "sourceRoot": "projects/plugin/src",
