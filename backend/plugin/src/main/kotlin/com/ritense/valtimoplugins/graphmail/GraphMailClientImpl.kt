@@ -1,30 +1,13 @@
-/*
- * Copyright 2015-2025 Ritense BV, the Netherlands.
- *
- * Licensed under EUPL, Version 1.2 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.ritense.valtimoplugins.graphmail
 
 import org.slf4j.LoggerFactory
-import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.util.LinkedMultiValueMap
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
-import org.springframework.web.client.RestTemplate
+import org.springframework.web.client.RestClient
 import org.springframework.web.util.UriComponentsBuilder
 import java.net.URI
 import java.time.Instant
@@ -51,7 +34,7 @@ private const val MAX_SEND_WALL_CLOCK_MS = 30_000L
 // Longer deadline for the draft+upload flow — large uploads can take tens of seconds.
 private const val MAX_DRAFT_SEND_WALL_CLOCK_MS = 120_000L
 private const val CHUNK_MAX_RETRIES = 3
-// Default token cache capacity — override via entra.plugin.max-cached-tokens.
+// Default token cache capacity — override via constructor parameter.
 // Increase if the deployment manages more than 64 distinct Entra app registrations.
 private const val DEFAULT_maxCachedTokens = 64
 
@@ -59,7 +42,7 @@ private const val DEFAULT_maxCachedTokens = 64
 // In Operaton BPM (V13), SERVICE_TASK actions run on the job-executor thread pool.
 // Worst case: 429 with Retry-After=15s × 5 attempts = 75s; wall-clock caps enforce the hard limit.
 // Size the job executor thread pool accordingly (operaton.bpm.job-executor.core-pool-size),
-// or replace with a non-blocking HTTP client (WebClient/RestClient) in a future release.
+// or replace with a non-blocking HTTP client (WebClient) in a future release.
 
 /**
  * Implementation of [GraphMailClient].
@@ -73,7 +56,7 @@ private const val DEFAULT_maxCachedTokens = 64
  * - PII-aware logging (mailbox + recipients are masked)
  */
 class GraphMailClientImpl(
-    private val restTemplate: RestTemplate,
+    private val restClient: RestClient,
     private val tokenBaseUrl: String = "https://login.microsoftonline.com",
     private val graphBaseUrl: String = "https://graph.microsoft.com",
     private val maxCachedTokens: Int = DEFAULT_maxCachedTokens,
@@ -147,7 +130,7 @@ class GraphMailClientImpl(
 
     private fun fetchAndCacheToken(tenantId: String, clientId: String, clientSecret: String, key: String): String {
         val url = UriComponentsBuilder
-            .fromHttpUrl("$tokenBaseUrl/{tenantId}/oauth2/v2.0/token")
+            .fromUriString("$tokenBaseUrl/{tenantId}/oauth2/v2.0/token")
             .build()
             .expand(tenantId)
             .toUriString()
@@ -158,9 +141,8 @@ class GraphMailClientImpl(
             add("client_secret", clientSecret)
             add("scope", GRAPH_SCOPE)
         }
-        val headers = HttpHeaders().apply { contentType = MediaType.APPLICATION_FORM_URLENCODED }
 
-        val response = postTokenWithRetry(url, HttpEntity(form, headers), tenantId)
+        val response = postTokenWithRetry(url, form, tenantId)
 
         // Guard against negative TTL if Azure returns expires_in < buffer.
         val ttl = (response.expiresIn.toLong() - TOKEN_EXPIRY_BUFFER_SECONDS).coerceAtLeast(0L)
@@ -172,13 +154,18 @@ class GraphMailClientImpl(
         return response.accessToken
     }
 
-    private fun postTokenWithRetry(url: String, request: HttpEntity<*>, tenantId: String): TokenResponse {
+    private fun postTokenWithRetry(url: String, form: LinkedMultiValueMap<String, String>, tenantId: String): TokenResponse {
         var attempt = 0
         var backoffMs = INITIAL_BACKOFF_MS
         while (true) {
             attempt++
             try {
-                return restTemplate.postForObject(url, request, TokenResponse::class.java)
+                return restClient.post()
+                    .uri(url)
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(form)
+                    .retrieve()
+                    .body(TokenResponse::class.java)
                     ?: throw GraphMailException("Empty response when fetching access token")
             } catch (ex: HttpClientErrorException) {
                 logger.error("Token request rejected ({}) for tenant [{}]", ex.statusCode, tenantId)
@@ -358,8 +345,11 @@ class GraphMailClientImpl(
                 .buildAndExpand(senderMailbox, draftId)
                 .toUri()
             val token = getAccessToken(tenantId, clientId, clientSecret)
-            val headers = HttpHeaders().apply { setBearerAuth(token) }
-            restTemplate.exchange(uri, HttpMethod.DELETE, HttpEntity<Void>(headers), Void::class.java)
+            restClient.delete()
+                .uri(uri)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .retrieve()
+                .toBodilessEntity()
             logger.debug("Orphaned draft deleted id={}", draftId)
         } catch (ex: Exception) {
             logger.warn("Failed to delete orphaned draft id={}: {}", draftId, ex.message)
@@ -388,14 +378,15 @@ class GraphMailClientImpl(
                 throw GraphMailException("Draft creation timed out after ${MAX_DRAFT_SEND_WALL_CLOCK_MS}ms")
             attempt++
             val token = getAccessToken(tenantId, clientId, clientSecret)
-            val headers = HttpHeaders().apply {
-                setBearerAuth(token)
-                contentType = MediaType.APPLICATION_JSON
-            }
             try {
-                val resp = restTemplate.exchange(uri, HttpMethod.POST,
-                    HttpEntity(message, headers), DraftMessageResponse::class.java)
-                return resp.body?.id
+                return restClient.post()
+                    .uri(uri)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(message)
+                    .retrieve()
+                    .body(DraftMessageResponse::class.java)
+                    ?.id
                     ?: throw GraphMailException("Empty response body when creating draft message")
             } catch (ex: HttpClientErrorException) {
                 when (ex.statusCode.value()) {
@@ -455,25 +446,25 @@ class GraphMailClientImpl(
             throw GraphMailException("Upload session creation timed out after ${MAX_DRAFT_SEND_WALL_CLOCK_MS}ms")
 
         var tokenRefreshed = false
-        val resp = try {
-            val token = getAccessToken(tenantId, clientId, clientSecret)
-            val headers = HttpHeaders().apply {
-                setBearerAuth(token)
-                contentType = MediaType.APPLICATION_JSON
-            }
-            restTemplate.exchange(uri, HttpMethod.POST, HttpEntity(body, headers),
-                UploadSessionResponse::class.java)
+
+        fun doPost(token: String): String =
+            restClient.post()
+                .uri(uri)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .body(UploadSessionResponse::class.java)
+                ?.uploadUrl
+                ?: throw GraphMailException("Empty uploadUrl in upload session response")
+
+        val uploadUrl = try {
+            doPost(getAccessToken(tenantId, clientId, clientSecret))
         } catch (ex: HttpClientErrorException) {
             if (ex.statusCode.value() == 401 && !tokenRefreshed) {
                 tokenRefreshed = true
                 invalidateCache(tenantId, clientId)
-                val token = getAccessToken(tenantId, clientId, clientSecret)
-                val headers = HttpHeaders().apply {
-                    setBearerAuth(token)
-                    contentType = MediaType.APPLICATION_JSON
-                }
-                restTemplate.exchange(uri, HttpMethod.POST, HttpEntity(body, headers),
-                    UploadSessionResponse::class.java)
+                doPost(getAccessToken(tenantId, clientId, clientSecret))
             } else {
                 throw GraphMailException(
                     "Graph API rejected upload session creation (${ex.statusCode})", ex,
@@ -481,15 +472,13 @@ class GraphMailClientImpl(
             }
         }
 
-        val uploadUrl = resp.body?.uploadUrl
-            ?: throw GraphMailException("Empty uploadUrl in upload session response")
         // Derive expected scheme+host from graphBaseUrl so WireMock tests (http://localhost)
         // pass while production rejects any non-Microsoft https:// domain.
         val expectedScheme = runCatching { java.net.URI.create(graphBaseUrl).scheme }.getOrElse { "https" }
         val expectedHost  = runCatching { java.net.URI.create(graphBaseUrl).host  }.getOrElse { "graph.microsoft.com" }
         val actualScheme  = runCatching { java.net.URI.create(uploadUrl).scheme   }.getOrNull()
         val actualHost    = runCatching { java.net.URI.create(uploadUrl).host     }.getOrNull()
-        val microsoftHosts = listOf(".microsoft.com", ".office.com", ".office.net")
+        val microsoftHosts = listOf(".microsoft.com", ".office.com", ".office.net", ".office365.com")
         require(actualScheme == expectedScheme &&
             (actualHost == expectedHost || microsoftHosts.any { actualHost?.endsWith(it) == true })) {
             "Upload URL from Graph API failed domain validation"
@@ -514,14 +503,15 @@ class GraphMailClientImpl(
             var success = false
             while (!success) {
                 chunkAttempt++
-                val headers = HttpHeaders().apply {
-                    contentType = MediaType.APPLICATION_OCTET_STREAM
-                    contentLength = chunkLen.toLong()
-                    set("Content-Range", "bytes $offset-$end/$total")
-                }
                 try {
-                    restTemplate.exchange(URI.create(uploadUrl), HttpMethod.PUT,
-                        HttpEntity(chunk, headers), Void::class.java)
+                    restClient.put()
+                        .uri(URI.create(uploadUrl))
+                        .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                        .contentLength(chunkLen.toLong())
+                        .header("Content-Range", "bytes $offset-$end/$total")
+                        .body(chunk)
+                        .retrieve()
+                        .toBodilessEntity()
                     success = true
                 } catch (ex: HttpClientErrorException) {
                     throw GraphMailException(
@@ -569,12 +559,13 @@ class GraphMailClientImpl(
                 throw GraphMailException("Draft send timed out after ${MAX_DRAFT_SEND_WALL_CLOCK_MS}ms")
             attempt++
             val token = getAccessToken(tenantId, clientId, clientSecret)
-            val headers = HttpHeaders().apply {
-                setBearerAuth(token)
-                contentLength = 0
-            }
             try {
-                restTemplate.exchange(uri, HttpMethod.POST, HttpEntity<Void>(null, headers), Void::class.java)
+                restClient.post()
+                    .uri(uri)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                    .contentLength(0)
+                    .retrieve()
+                    .toBodilessEntity()
                 return
             } catch (ex: HttpClientErrorException) {
                 when (ex.statusCode.value()) {
@@ -629,12 +620,14 @@ class GraphMailClientImpl(
             }
             attempt++
             val token = getAccessToken(tenantId, clientId, clientSecret)
-            val headers = HttpHeaders().apply {
-                setBearerAuth(token)
-                contentType = MediaType.APPLICATION_JSON
-            }
             try {
-                restTemplate.exchange(url, HttpMethod.POST, HttpEntity(payload, headers), Void::class.java)
+                restClient.post()
+                    .uri(url)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .toBodilessEntity()
                 return
             } catch (ex: HttpClientErrorException) {
                 when (ex.statusCode.value()) {

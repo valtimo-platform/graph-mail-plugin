@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
+import org.springframework.web.client.RestClient
 import org.springframework.web.client.RestTemplate
 
 class GraphMailClientTest {
@@ -78,7 +79,7 @@ class GraphMailClientTest {
             messageConverters.add(0, MappingJackson2HttpMessageConverter(mapper))
         }
 
-        client = GraphMailClientImpl(rest, wireMock.baseUrl(), wireMock.baseUrl())
+        client = GraphMailClientImpl(RestClient.create(rest), wireMock.baseUrl(), wireMock.baseUrl())
     }
 
     @AfterEach
