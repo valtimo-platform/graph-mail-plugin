@@ -137,7 +137,11 @@ operaton:
       properties:
         deploy-changed-only: true
         enforceHistoryTimeToLive: false
+    job-executor:
+      core-pool-size: 20
+      max-pool-size: 50
 
 implementation:
   suwinet:
     maxAgeKindAlsThuiswonend: 100
+
