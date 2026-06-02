@@ -16,9 +16,9 @@
 
 dockerCompose {
     setProjectName("graph-mail-plugin")
-    isRequiredBy(project.tasks.integrationTesting)
+    isRequiredBy(project.tasks.test)
 
-    tasks.integrationTesting {
+    tasks.test {
         useComposeFiles.addAll("$rootDir/docker-resources/docker-compose-base-test.yml", "docker-compose-override.yml")
     }
 }
