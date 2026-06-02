@@ -59,7 +59,7 @@ export class GraphMailPluginConfigurationComponent
 
   // Aligned with the backend EMAIL_REGEX in GraphMailValidation.kt — keep in sync.
   private static readonly EMAIL_RE =
-    /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9][a-zA-Z0-9.\-]*\.[a-zA-Z]{2,}$/;
+    /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/;
 
   // Azure Tenant IDs and Client IDs are always GUIDs.
   private static readonly UUID_RE =
