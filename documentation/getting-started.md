@@ -51,7 +51,7 @@ npm run build
 Voeg de volgende dependency toe aan je `build.gradle.kts`:
 
 ```kotlin
-implementation("com.ritense.valtimoplugins:graph-mail:1.0.0")
+implementation("com.ritense.valtimoplugins:graph-mail:1.0.1")
 ```
 
 Voeg de volgende configuratie toe aan je `application.yml`:
