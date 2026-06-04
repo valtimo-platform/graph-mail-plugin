@@ -1,7 +1,7 @@
 {
     "name": "@valtimo-plugins/graph-mail",
     "license": "EUPL-1.2",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "scripts": {
         "build": "ng build @valtimo-plugins/graph-mail",
         "watch": "ng build @valtimo-plugins/graph-mail --watch"

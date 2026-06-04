@@ -141,10 +141,11 @@ class GraphMailPlugin(
     @PluginProperty(key = "readTimeoutSeconds", secret = false, required = false)
     var readTimeoutSeconds: Long = 30
 
-    // NOTE: USER_TASK_CREATE fires when a user task is committed to the database.
-    // If the surrounding Operaton transaction rolls back and retries (e.g. optimistic lock),
-    // the email may be sent again before the task appears in the UI. Accept this risk, or
-    // use an idempotency token stored in a process variable to deduplicate on the receiver side.
+    // NOTE: SERVICE_TASK_START fires when the service task begins executing, on the
+    // Operaton job-executor thread. If the surrounding transaction rolls back and retries
+    // (e.g. optimistic lock), this action runs again and the email may be sent more than once.
+    // This is accepted (at-least-once): there is no idempotency guard. A process variable is
+    // NOT a reliable guard here — it is transactional and rolls back together with the retry.
     @PluginAction(
         key = "send-email",
         title = "Send email",

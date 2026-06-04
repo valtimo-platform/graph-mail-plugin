@@ -7,10 +7,12 @@ Verstuur e-mails via de Microsoft Graph API met OAuth2 (Client Credentials flow)
 Een **Azure App Registration** met de volgende instellingen:
 
 - Applicatiemachtiging: `Mail.Send` (niet delegated) — vereist voor alle e-mailverzendingen
-- Applicatiemachtiging: `Mail.ReadWrite` (niet delegated) — vereist voor bijlagen groter dan 3 MB; de plugin maakt dan eerst een conceptbericht aan via de Graph API upload-sessie flow
+- Applicatiemachtiging: `Mail.ReadWrite` (niet delegated) — vereist zodra één losse bijlage óf het totaal van alle bijlagen samen groter is dan 2 MB; de plugin maakt dan eerst een conceptbericht aan via de Graph API upload-sessie flow
 - Een client secret aangemaakt onder *Certificates & secrets*
 
-> **Let op:** zonder `Mail.ReadWrite` mislukt het versturen van bijlagen groter dan 3 MB met een 403-fout. Voor e-mails zonder bijlagen of met bijlagen tot 3 MB is alleen `Mail.Send` voldoende.
+> **Let op:** zonder `Mail.ReadWrite` mislukt het versturen via de upload-sessie (zodra één losse bijlage óf het totaal van de bijlagen groter is dan 2 MB) met een 403-fout. Voor e-mails zonder bijlagen, of waarbij zowel elke losse bijlage als het totaal 2 MB of kleiner is, is alleen `Mail.Send` voldoende.
+
+> **Beheerdersconsent vereist:** `Mail.Send` en `Mail.ReadWrite` zijn *applicatiemachtigingen* (niet delegated). Deze kunnen in Microsoft Entra ID niet door een gewone gebruiker worden toegekend — een tenant-/Entra-beheerder moet de machtigingen verlenen én er admin consent voor geven. Stem dit dus af met de beheerder van je organisatie voordat de plugin in gebruik wordt genomen. Ken alleen de strikt benodigde machtigingen toe (`Mail.Send`, en `Mail.ReadWrite` uitsluitend als je bijlagen groter dan 2 MB verstuurt).
 
 ## Pluginconfiguratie
 
@@ -47,7 +49,7 @@ De weergavenaam die de ontvanger ziet, is de Display Name die is ingesteld op de
 E-mails verzonden via de `send-email` actie worden opgeslagen in de Sent Items van de afzendermailbox. E-mails verstuurd via de test-send functie op de configuratiepagina worden *niet* opgeslagen.
 
 **Bijlagen — twee verzendpaden**
-Bijlagen van 3 MB of kleiner worden inline (base64) meegestuurd in de sendMail-aanroep. Bijlagen groter dan 3 MB worden automatisch via een Graph API upload-sessie verstuurd (concept → chunked upload → verzenden). Bij de upload-sessie is het verzendtijdstip het moment van de definitieve verzendaanroep, niet het moment van conceptaanmaak.
+De plugin verstuurt bijlagen inline (base64) in de sendMail-aanroep zolang zowel elke losse bijlage als het totaal van alle bijlagen samen 2 MB of kleiner is. Zodra één losse bijlage óf het totaal boven 2 MB komt, schakelt de plugin automatisch over op de Graph API upload-sessie (concept → chunked upload → verzenden). Bij de upload-sessie is het verzendtijdstip het moment van de definitieve verzendaanroep, niet het moment van conceptaanmaak.
 
 **Dubbele verzending bij transactieretry**
 De plugin-actie vuurt op `SERVICE_TASK_START`. Als de Operaton-transactie terugdraait en opnieuw start (bijvoorbeeld bij een optimistic lock conflict), kan de e-mail meer dan één keer worden verzonden. Mitigatie: sla een idempotency-token op als procesvariabele en dedupliceer aan de ontvangerskant.
@@ -77,7 +79,7 @@ De retry-backoff gebruikt `Thread.sleep()`, waardoor de aanroepende Operaton job
 | Situatie | Maximale blokkeerttijd |
 |----------|----------------------|
 | Reguliere verzending (geen grote bijlagen) | 30 seconden |
-| Verzending via upload-sessie (bijlage > 3 MB) | 120 seconden |
+| Verzending via upload-sessie (bijlage > 2 MB) | 120 seconden |
 | 429 rate-limit sleep per poging (max) | 15 seconden |
 
 Als meerdere processen tegelijk e-mails versturen terwijl de Graph API rate-limiteert, kunnen alle job-executor threads tegelijkertijd geblokkeerd worden. Dit stopt de verwerking van alle andere Operaton-taken in de applicatie.
@@ -93,6 +95,8 @@ operaton:
 ```
 
 Bij minder dan 20 threads loop je een reëel risico op een vastgelopen job-executor onder normale productielast. De plugin logt een waarschuwing bij opstarten als herinnering.
+
+> **Let op (queue-size):** bij een thread-pool-executor worden threads bóven `core-pool-size` pas aangemaakt wanneer de wachtrij vol is. Staat `queue-size` hoog, dan blijft de pool in de praktijk op `core-pool-size` steken en doet `max-pool-size` niets. Houd `queue-size` daarom klein als je op de extra threads wilt kunnen leunen, en stem het totale aantal threads af op de database-connectiepool (meer werkers betekent meer gelijktijdige verbindingen).
 
 ## Test-send
 
