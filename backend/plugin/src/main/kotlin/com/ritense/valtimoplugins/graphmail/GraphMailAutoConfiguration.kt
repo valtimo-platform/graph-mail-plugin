@@ -23,7 +23,6 @@ import java.time.Duration
 // swallows the rest of the file. Keeping all doc text in line comments avoids that trap.
 @AutoConfiguration
 class GraphMailAutoConfiguration {
-
     private val logger = LoggerFactory.getLogger(GraphMailAutoConfiguration::class.java)
 
     // Fired once after the full application context is ready.
@@ -34,9 +33,9 @@ class GraphMailAutoConfiguration {
     fun warnOnStartup() {
         logger.warn(
             "[Graph Mail Plugin] IMPORTANT: this plugin blocks Operaton job-executor threads during " +
-            "retry backoff (up to 30s per send, 120s for large attachments). " +
-            "Set operaton.bpm.job-executor.core-pool-size >= 20 and max-pool-size >= 50 " +
-            "to prevent job-executor starvation under load. See documentation/plugin.md for details."
+                "retry backoff (up to 30s per send, 120s for large attachments). " +
+                "Set operaton.bpm.job-executor.core-pool-size >= 20 and max-pool-size >= 50 " +
+                "to prevent job-executor starvation under load. See documentation/plugin.md for details.",
         )
     }
 
@@ -46,11 +45,12 @@ class GraphMailAutoConfiguration {
         restTemplateBuilder: RestTemplateBuilder,
         objectMapper: ObjectMapper,
     ): GraphMailClient {
-        val restTemplate = restTemplateBuilder
-            .connectTimeout(Duration.ofSeconds(10))
-            .readTimeout(Duration.ofSeconds(30))
-            .build()
-            .also { configureJackson(it, objectMapper) }
+        val restTemplate =
+            restTemplateBuilder
+                .connectTimeout(Duration.ofSeconds(10))
+                .readTimeout(Duration.ofSeconds(30))
+                .build()
+                .also { configureJackson(it, objectMapper) }
 
         return GraphMailClientImpl(RestClient.create(restTemplate))
     }
@@ -63,9 +63,14 @@ class GraphMailAutoConfiguration {
         objectMapper: ObjectMapper,
         resourceStorageService: TemporaryResourceStorageService,
         eventPublisher: ApplicationEventPublisher,
-    ): GraphMailPluginFactory = GraphMailPluginFactory(
-        pluginService, restTemplateBuilder, objectMapper, resourceStorageService, eventPublisher
-    )
+    ): GraphMailPluginFactory =
+        GraphMailPluginFactory(
+            pluginService,
+            restTemplateBuilder,
+            objectMapper,
+            resourceStorageService,
+            eventPublisher,
+        )
 
     @Bean
     @ConditionalOnMissingBean(GraphMailTestSendController::class)
@@ -80,7 +85,10 @@ class GraphMailAutoConfiguration {
     @ConditionalOnMissingBean(GraphMailHttpSecurityConfigurer::class)
     fun graphMailHttpSecurityConfigurer(): GraphMailHttpSecurityConfigurer = GraphMailHttpSecurityConfigurer()
 
-    private fun configureJackson(restTemplate: RestTemplate, objectMapper: ObjectMapper) {
+    private fun configureJackson(
+        restTemplate: RestTemplate,
+        objectMapper: ObjectMapper,
+    ) {
         restTemplate.messageConverters.removeIf { it is MappingJackson2HttpMessageConverter }
         restTemplate.messageConverters.add(0, MappingJackson2HttpMessageConverter(objectMapper))
     }

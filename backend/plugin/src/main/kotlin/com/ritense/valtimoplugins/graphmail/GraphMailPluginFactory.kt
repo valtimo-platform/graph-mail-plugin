@@ -14,7 +14,6 @@ class GraphMailPluginFactory(
     private val resourceStorageService: TemporaryResourceStorageService,
     private val eventPublisher: ApplicationEventPublisher,
 ) : PluginFactory<GraphMailPlugin>(pluginService) {
-
     override fun create(): GraphMailPlugin =
         GraphMailPlugin(restTemplateBuilder, objectMapper, resourceStorageService, eventPublisher)
 }

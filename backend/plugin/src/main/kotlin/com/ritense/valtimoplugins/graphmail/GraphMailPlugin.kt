@@ -29,20 +29,24 @@ private const val MAX_BODY_CONTENT_BYTES = 5 * 1_048_576
 // inline `style` attributes for layout. <style> blocks are excluded: CSS url()/@import
 // can trigger external requests (GDPR tracking pixels) and load malicious stylesheets.
 // data: URIs excluded from img src: SVG+script payload, SEG/DLP bypass. Use cid: or https:.
-private val EMAIL_HTML_SAFELIST: Safelist = Safelist.relaxed()
-    .addTags("center", "hr")
-    .addAttributes(":all", "style", "class", "id", "title", "align", "bgcolor", "valign")
-    .addAttributes("table", "border", "cellpadding", "cellspacing", "width")
-    .addAttributes("td", "colspan", "rowspan", "width")
-    .addAttributes("th", "colspan", "rowspan", "width")
-    .addAttributes("img", "width", "height")
-    .addProtocols("a", "href", "http", "https", "mailto", "tel")
-    .addProtocols("img", "src", "http", "https", "cid")
+private val EMAIL_HTML_SAFELIST: Safelist =
+    Safelist
+        .relaxed()
+        .addTags("center", "hr")
+        .addAttributes(":all", "style", "class", "id", "title", "align", "bgcolor", "valign")
+        .addAttributes("table", "border", "cellpadding", "cellspacing", "width")
+        .addAttributes("td", "colspan", "rowspan", "width")
+        .addAttributes("th", "colspan", "rowspan", "width")
+        .addAttributes("img", "width", "height")
+        .addProtocols("a", "href", "http", "https", "mailto", "tel")
+        .addProtocols("img", "src", "http", "https", "cid")
 
-private val EMAIL_OUTPUT_SETTINGS = org.jsoup.nodes.Document.OutputSettings().prettyPrint(false)
+private val EMAIL_OUTPUT_SETTINGS =
+    org.jsoup.nodes.Document
+        .OutputSettings()
+        .prettyPrint(false)
 
-private fun sanitizeHtml(html: String): String =
-    Jsoup.clean(html, "", EMAIL_HTML_SAFELIST, EMAIL_OUTPUT_SETTINGS)
+private fun sanitizeHtml(html: String): String = Jsoup.clean(html, "", EMAIL_HTML_SAFELIST, EMAIL_OUTPUT_SETTINGS)
 
 // Splits a plugin action property into individual string values.
 // Supports three formats so process designers can use whichever is most convenient:
@@ -53,15 +57,25 @@ internal fun parseStringListParam(value: String?): List<String> {
     if (value.isNullOrBlank()) return emptyList()
     val trimmed = value.trim()
     if (trimmed.startsWith("[")) {
-        return trimmed.removePrefix("[").removeSuffix("]")
+        return trimmed
+            .removePrefix("[")
+            .removeSuffix("]")
             .split(",")
-            .map { it.trim().removeSurrounding("\"").removeSurrounding("'").trim() }
-            .filter { it.isNotBlank() }
+            .map {
+                it
+                    .trim()
+                    .removeSurrounding("\"")
+                    .removeSurrounding("'")
+                    .trim()
+            }.filter { it.isNotBlank() }
     }
     return trimmed.split(",").map { it.trim() }.filter { it.isNotBlank() }
 }
 
-private fun parseRecipients(values: List<String>, fieldName: String): List<GraphRecipient> {
+private fun parseRecipients(
+    values: List<String>,
+    fieldName: String,
+): List<GraphRecipient> {
     if (values.isEmpty()) return emptyList()
     require(values.size <= MAX_RECIPIENTS_PER_FIELD) {
         "Too many addresses in '$fieldName': ${values.size} (max $MAX_RECIPIENTS_PER_FIELD)"
@@ -92,10 +106,11 @@ class GraphMailPlugin(
     // the first sendEmail() call triggers this block.
     private val client: GraphMailClient by lazy {
         clientOverride ?: run {
-            val rt = restTemplateBuilder
-                .connectTimeout(Duration.ofSeconds(connectTimeoutSeconds))
-                .readTimeout(Duration.ofSeconds(readTimeoutSeconds))
-                .build()
+            val rt =
+                restTemplateBuilder
+                    .connectTimeout(Duration.ofSeconds(connectTimeoutSeconds))
+                    .readTimeout(Duration.ofSeconds(readTimeoutSeconds))
+                    .build()
             rt.messageConverters.removeIf { it is MappingJackson2HttpMessageConverter }
             rt.messageConverters.add(0, MappingJackson2HttpMessageConverter(objectMapper))
             GraphMailClientImpl(RestClient.create(rt), tokenBaseUrl, graphBaseUrl)
@@ -189,7 +204,9 @@ class GraphMailPlugin(
         require(subject.length <= MAX_SUBJECT_LENGTH) {
             "Email subject exceeds $MAX_SUBJECT_LENGTH characters (${subject.length})"
         }
-        require(isValidResourceId(contentId)) { "Invalid contentId: '$contentId' — must not be blank or contain path-traversal sequences" }
+        require(isValidResourceId(contentId)) {
+            "Invalid contentId: '$contentId' — must not be blank or contain path-traversal sequences"
+        }
 
         val toRecipients = parseRecipients(parseStringListParam(recipients), "recipients")
         val ccRecipients = parseRecipients(parseStringListParam(cc), "cc")
@@ -211,8 +228,12 @@ class GraphMailPlugin(
 
         val attachments = resolveAttachments(parseStringListParam(attachmentIds).ifEmpty { null })
 
-        logger.debug("Preparing email — to: {} addresses, from: '{}', subject length: {}",
-            toRecipients.size, maskEmail(senderMailbox), subject.length)
+        logger.debug(
+            "Preparing email — to: {} addresses, from: '{}', subject length: {}",
+            toRecipients.size,
+            maskEmail(senderMailbox),
+            subject.length,
+        )
 
         val auditStart = System.currentTimeMillis()
         try {
@@ -241,14 +262,16 @@ class GraphMailPlugin(
                 attachments.size,
                 durationMs,
             )
-            publishEventSafely(GraphMailEmailSentEvent(
-                senderMailbox = maskEmail(senderMailbox),
-                recipientCount = toRecipients.size,
-                ccCount = ccRecipients.size,
-                bccCount = bccRecipients.size,
-                attachmentCount = attachments.size,
-                durationMs = durationMs,
-            ))
+            publishEventSafely(
+                GraphMailEmailSentEvent(
+                    senderMailbox = maskEmail(senderMailbox),
+                    recipientCount = toRecipients.size,
+                    ccCount = ccRecipients.size,
+                    bccCount = bccRecipients.size,
+                    attachmentCount = attachments.size,
+                    durationMs = durationMs,
+                ),
+            )
         } catch (ex: Exception) {
             val durationMs = System.currentTimeMillis() - auditStart
             auditLogger.warn(
@@ -259,13 +282,16 @@ class GraphMailPlugin(
                 durationMs,
                 ex.message,
             )
-            publishEventSafely(GraphMailEmailFailedEvent(
-                senderMailbox = maskEmail(senderMailbox),
-                recipientCount = toRecipients.size,
-                reason = (ex.message ?: ex.javaClass.simpleName)
-                    .replace(EMAIL_IN_TEXT_REGEX) { maskEmail(it.value) },
-                durationMs = durationMs,
-            ))
+            publishEventSafely(
+                GraphMailEmailFailedEvent(
+                    senderMailbox = maskEmail(senderMailbox),
+                    recipientCount = toRecipients.size,
+                    reason =
+                        (ex.message ?: ex.javaClass.simpleName)
+                            .replace(EMAIL_IN_TEXT_REGEX) { maskEmail(it.value) },
+                    durationMs = durationMs,
+                ),
+            )
             throw ex
         }
     }
@@ -297,29 +323,35 @@ class GraphMailPlugin(
             val fileName = metadata["fileName"] as? String ?: resourceId
             val contentType = metadata["contentType"] as? String ?: "application/octet-stream"
 
-            val raw = resourceStorageService.getResourceContentAsInputStream(resourceId)
-                ?: throw GraphMailException("Attachment '$resourceId' not found in temporary storage")
+            val raw =
+                resourceStorageService.getResourceContentAsInputStream(resourceId)
+                    ?: throw GraphMailException("Attachment '$resourceId' not found in temporary storage")
 
             // Read with a hard cap so a single oversized blob doesn't blow up the heap.
             val rawBytes = raw.use { it.readNBytesCapped(MAX_SINGLE_ATTACHMENT_BYTES + 1L) }
             require(rawBytes.size <= MAX_SINGLE_ATTACHMENT_BYTES) {
                 "Attachment '$fileName' exceeds ${MAX_SINGLE_ATTACHMENT_BYTES / (1024 * 1024)} MB " +
-                "(${rawBytes.size} bytes)."
+                    "(${rawBytes.size} bytes)."
             }
             totalBytes += rawBytes.size
             require(totalBytes <= MAX_TOTAL_ATTACHMENT_BYTES) {
                 "Total attachment size exceeds ${MAX_TOTAL_ATTACHMENT_BYTES / (1024 * 1024)} MB ($totalBytes bytes)."
             }
 
-            logger.debug("Attachment resolved: name='{}', type='{}', size={}",
-                fileName, contentType, rawBytes.size)
+            logger.debug(
+                "Attachment resolved: name='{}', type='{}', size={}",
+                fileName,
+                contentType,
+                rawBytes.size,
+            )
             ResolvedAttachment(name = fileName, contentType = contentType, rawBytes = rawBytes)
         }
     }
 
     private fun resolveBodyContent(contentId: String): String {
-        val stream = resourceStorageService.getResourceContentAsInputStream(contentId)
-            ?: throw GraphMailException("Body content '$contentId' not found in temporary storage")
+        val stream =
+            resourceStorageService.getResourceContentAsInputStream(contentId)
+                ?: throw GraphMailException("Body content '$contentId' not found in temporary storage")
         val bytes = stream.use { it.readNBytesCapped(MAX_BODY_CONTENT_BYTES + 1L) }
         require(bytes.size <= MAX_BODY_CONTENT_BYTES) {
             "Body content '$contentId' exceeds maximum allowed size of $MAX_BODY_CONTENT_BYTES bytes"

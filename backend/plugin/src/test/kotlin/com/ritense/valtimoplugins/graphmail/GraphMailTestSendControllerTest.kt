@@ -38,14 +38,14 @@ private const val VALID_RECIPIENT = "recipient@test.nl"
 private const val VALID_SENDER = "sender@test.nl"
 
 class GraphMailTestSendControllerTest {
-
     private val mailClient: GraphMailClient = mock()
     private val pluginService: PluginService = mock()
     private val storage: TemporaryResourceStorageService = mock()
     private val eventPublisher: ApplicationEventPublisher = mock()
-    private val authentication: Authentication = mock<Authentication>().also {
-        whenever(it.name).thenReturn("test-admin")
-    }
+    private val authentication: Authentication =
+        mock<Authentication>().also {
+            whenever(it.name).thenReturn("test-admin")
+        }
     private lateinit var controller: GraphMailTestSendController
 
     private fun plugin(sender: String? = VALID_SENDER): GraphMailPlugin =
@@ -61,8 +61,9 @@ class GraphMailTestSendControllerTest {
         controller = GraphMailTestSendController(mailClient, pluginService, eventPublisher)
     }
 
-    private fun send(request: GraphMailTestSendRequest = GraphMailTestSendRequest(VALID_CONFIG_ID, VALID_RECIPIENT, VALID_SENDER)) =
-        controller.testSend(request, authentication)
+    private fun send(
+        request: GraphMailTestSendRequest = GraphMailTestSendRequest(VALID_CONFIG_ID, VALID_RECIPIENT, VALID_SENDER),
+    ) = controller.testSend(request, authentication)
 
     // sendMail signature (12 params):
     // tenantId(1), clientId(2), clientSecret(3), senderMailbox(4),
@@ -70,8 +71,22 @@ class GraphMailTestSendControllerTest {
     // subject(9), bodyHtml(10), attachments(11), saveToSentItems(12)
 
     private fun stubSendMail() =
-        whenever(mailClient.sendMail(any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any(), any()))
+        whenever(
+            mailClient.sendMail(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            ),
+        )
 
     private fun stubPlugin(sender: String? = VALID_SENDER) =
         whenever(pluginService.createInstance(any<PluginConfigurationId>())).thenReturn(plugin(sender))
@@ -170,8 +185,18 @@ class GraphMailTestSendControllerTest {
         stubPlugin()
         send()
         verify(mailClient).sendMail(
-            eq("tenant-id"), eq("client-id"), eq("client-secret"),
-            eq(VALID_SENDER), any(), any(), any(), any(), any(), any(), any(), any()
+            eq("tenant-id"),
+            eq("client-id"),
+            eq("client-secret"),
+            eq(VALID_SENDER),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
         )
     }
 
@@ -180,8 +205,18 @@ class GraphMailTestSendControllerTest {
         send()
         val captor = argumentCaptor<List<GraphRecipient>>()
         verify(mailClient).sendMail(
-            any(), any(), any(), any(),
-            captor.capture(), any(), any(), any(), any(), any(), any(), any()
+            any(),
+            any(),
+            any(),
+            any(),
+            captor.capture(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
         )
         assertEquals(1, captor.firstValue.size)
         assertEquals(VALID_RECIPIENT, captor.firstValue[0].emailAddress.address)
@@ -192,8 +227,18 @@ class GraphMailTestSendControllerTest {
         val captor = argumentCaptor<Boolean>()
         send()
         verify(mailClient).sendMail(
-            any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), captor.capture()
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            captor.capture(),
         )
         assertFalse(captor.firstValue)
     }

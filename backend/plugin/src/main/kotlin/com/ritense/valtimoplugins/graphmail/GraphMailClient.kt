@@ -11,7 +11,6 @@ package com.ritense.valtimoplugins.graphmail
  * (Mockito, MockK, Spring Test) without coupling to the HTTP implementation.
  */
 interface GraphMailClient {
-
     fun sendMail(
         tenantId: String,
         clientId: String,
@@ -31,5 +30,8 @@ interface GraphMailClient {
      * Invalidate the cached token for one tenant/client pair.
      * If both args are null the entire cache is flushed (rare — global compromise).
      */
-    fun invalidateCache(tenantId: String? = null, clientId: String? = null)
+    fun invalidateCache(
+        tenantId: String? = null,
+        clientId: String? = null,
+    )
 }

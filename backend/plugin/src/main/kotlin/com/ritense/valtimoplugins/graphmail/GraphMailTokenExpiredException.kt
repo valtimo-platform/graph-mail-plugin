@@ -8,4 +8,7 @@ package com.ritense.valtimoplugins.graphmail
  * or the configured mailbox does not exist for the Azure tenant — token refresh
  * has been attempted internally already.
  */
-class GraphMailTokenExpiredException(message: String, cause: Throwable? = null) : GraphMailException(message, cause)
+class GraphMailTokenExpiredException(
+    message: String,
+    cause: Throwable? = null,
+) : GraphMailException(message, cause)
