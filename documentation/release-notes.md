@@ -2,6 +2,10 @@
 
 Overzicht van wijzigingen per versie van de Graph Mail-plugin.
 
+## 1.0.2
+
+Valtimo bijgewerkt naar versie 13.41.0.
+
 ## 1.0.1
 Correcties in de documentatie en kleine verbeteringen in de plugin.
 
