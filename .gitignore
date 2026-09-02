@@ -142,6 +142,13 @@ Desktop.ini
 !libs/s3-resource-*.jar
 
 ######################
+# Python
+######################
+__pycache__/
+*.py[cod]
+*$py.class
+
+######################
 # ESLint
 ######################
 .eslintcache
