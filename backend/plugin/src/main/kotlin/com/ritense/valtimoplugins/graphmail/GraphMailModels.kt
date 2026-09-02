@@ -6,9 +6,17 @@ import com.fasterxml.jackson.annotation.JsonProperty
 const val GRAPH_BODY_CONTENT_TYPE_HTML = "HTML"
 const val GRAPH_BODY_CONTENT_TYPE_TEXT = "Text"
 
-// Attachments at or below this threshold are embedded inline (base64) in the sendMail JSON body.
-// Larger files use the upload-session flow (create draft → chunked PUT → send).
-const val INLINE_ATTACHMENT_THRESHOLD_BYTES = 2L * 1024L * 1024L
+// Graph's hard minimum for attachment upload sessions; smaller files must use a plain POST.
+const val UPLOAD_SESSION_MIN_BYTES = 3L * 1024L * 1024L
+
+// Graph rejects write requests over 4 MiB with HTTP 413 (base64-encoded size).
+const val MAX_GRAPH_WRITE_BYTES = 4L * 1024L * 1024L
+
+// Headroom inside MAX_GRAPH_WRITE_BYTES for the JSON envelope; generous on purpose.
+const val GRAPH_ENVELOPE_OVERHEAD_BYTES = 64L * 1024L
+
+// Encoded length of `n` raw bytes in base64, including padding.
+fun base64Length(n: Long): Long = 4L * ((n + 2L) / 3L)
 
 // Hard limits enforced before any API call — raised to 25 MB now that upload sessions are supported.
 const val MAX_SINGLE_ATTACHMENT_BYTES = 25L * 1024L * 1024L

@@ -484,7 +484,7 @@ class GraphMailClientTest {
     @Test fun `small attachment stays on inline sendMail path`() {
         stubToken()
         wireMock.stubFor(post(urlPathMatching(mailPath)).willReturn(aResponse().withStatus(202)))
-        val attachment = resolvedAttachment("small.pdf", INLINE_ATTACHMENT_THRESHOLD_BYTES.toInt())
+        val attachment = resolvedAttachment("small.pdf", 1024 * 1024)
         client.sendMail(
             tenantId,
             clientId,
@@ -511,7 +511,7 @@ class GraphMailClientTest {
         wireMock.stubFor(put(anyUrl()).willReturn(aResponse().withStatus(200)))
         stubSendDraft()
 
-        val attachment = resolvedAttachment("large.bin", (INLINE_ATTACHMENT_THRESHOLD_BYTES + 1).toInt())
+        val attachment = resolvedAttachment("large.bin", UPLOAD_SESSION_MIN_BYTES.toInt())
         client.sendMail(
             tenantId,
             clientId,
@@ -572,14 +572,7 @@ class GraphMailClientTest {
     // ── Draft flow: createDraft error handling ────────────────────────────────
 
     private fun sendLarge(
-        attachment: ResolvedAttachment =
-            resolvedAttachment(
-                "f.bin",
-                (
-                    INLINE_ATTACHMENT_THRESHOLD_BYTES +
-                        1
-                ).toInt(),
-            ),
+        attachment: ResolvedAttachment = resolvedAttachment("f.bin", UPLOAD_SESSION_MIN_BYTES.toInt()),
     ) = client.sendMail(
         tenantId,
         clientId,
@@ -817,7 +810,7 @@ class GraphMailClientTest {
         wireMock.stubFor(put(anyUrl()).willReturn(aResponse().withStatus(200)))
         stubSendDraft()
 
-        val attachment = resolvedAttachment("f.bin", (INLINE_ATTACHMENT_THRESHOLD_BYTES + 1).toInt())
+        val attachment = resolvedAttachment("f.bin", UPLOAD_SESSION_MIN_BYTES.toInt())
         client.sendMail(
             tenantId,
             clientId,
@@ -835,5 +828,95 @@ class GraphMailClientTest {
 
         wireMock.verify(2, postRequestedFor(urlPathMatching(uploadSessionPath)))
         wireMock.verify(1, postRequestedFor(urlPathMatching(sendDraftPath)))
+    }
+
+    // ── Attachment routing around Graph's 3 MiB upload-session minimum ────────
+
+    private val addAttachmentPath = ".*/messages/.*/attachments$"
+
+    private fun stubAddAttachment() {
+        wireMock.stubFor(
+            post(urlPathMatching(addAttachmentPath))
+                .willReturn(okJson("""{"id":"att-1"}""")),
+        )
+    }
+
+    private fun sendWith(attachments: List<ResolvedAttachment>) =
+        client.sendMail(
+            tenantId,
+            clientId,
+            clientSecret,
+            mailbox,
+            recipients("jan@test.nl"),
+            emptyList(),
+            emptyList(),
+            emptyList(),
+            "T",
+            "<p>B</p>",
+            attachments,
+            true,
+        )
+
+    @Test fun `attachment just under the minimum uses a plain POST, never an upload session`() {
+        stubToken()
+        stubDraftCreate()
+        stubAddAttachment()
+        stubSendDraft()
+
+        // Too big for a single sendMail once base64-encoded, too small for an upload session.
+        sendWith(listOf(resolvedAttachment("almost.bin", (UPLOAD_SESSION_MIN_BYTES - 1).toInt())))
+
+        wireMock.verify(0, postRequestedFor(urlPathMatching(uploadSessionPath)))
+        wireMock.verify(1, postRequestedFor(urlPathMatching(draftPath)))
+        wireMock.verify(1, postRequestedFor(urlPathMatching(addAttachmentPath)))
+        wireMock.verify(1, postRequestedFor(urlPathMatching(sendDraftPath)))
+    }
+
+    @Test fun `several small attachments over the write limit use plain POSTs, not upload sessions`() {
+        stubToken()
+        stubDraftCreate()
+        stubAddAttachment()
+        stubSendDraft()
+
+        // 3 x 1.5 MiB: over the inline limit in total, each file below the session minimum.
+        val attachment = resolvedAttachment("part.bin", 3 * 512 * 1024)
+        sendWith(listOf(attachment, attachment, attachment))
+
+        wireMock.verify(0, postRequestedFor(urlPathMatching(uploadSessionPath)))
+        wireMock.verify(3, postRequestedFor(urlPathMatching(addAttachmentPath)))
+        wireMock.verify(1, postRequestedFor(urlPathMatching(sendDraftPath)))
+    }
+
+    @Test fun `mixed sizes route each attachment independently`() {
+        stubToken()
+        stubDraftCreate()
+        stubAddAttachment()
+        stubUploadSession("${wireMock.baseUrl()}/upload/mixed")
+        wireMock.stubFor(put(anyUrl()).willReturn(aResponse().withStatus(200)))
+        stubSendDraft()
+
+        sendWith(
+            listOf(
+                resolvedAttachment("big.bin", UPLOAD_SESSION_MIN_BYTES.toInt()),
+                resolvedAttachment("tiny.txt", 512),
+            ),
+        )
+
+        wireMock.verify(1, postRequestedFor(urlPathMatching(uploadSessionPath)))
+        wireMock.verify(1, postRequestedFor(urlPathMatching(addAttachmentPath)))
+        wireMock.verify(1, postRequestedFor(urlPathMatching(sendDraftPath)))
+    }
+
+    @Test fun `several small attachments within the write limit stay on inline sendMail`() {
+        stubToken()
+        wireMock.stubFor(post(urlPathMatching(mailPath)).willReturn(aResponse().withStatus(202)))
+
+        // 2 x 1 MiB -> ~2.7 MiB base64, still inside the 4 MiB write limit.
+        val attachment = resolvedAttachment("part.bin", 1024 * 1024)
+        sendWith(listOf(attachment, attachment))
+
+        wireMock.verify(1, postRequestedFor(urlPathMatching(mailPath)))
+        wireMock.verify(0, postRequestedFor(urlPathMatching(draftPath)))
+        wireMock.verify(0, postRequestedFor(urlPathMatching(uploadSessionPath)))
     }
 }

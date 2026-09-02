@@ -26,20 +26,7 @@ import org.springframework.stereotype.Component
 import java.io.ByteArrayInputStream
 import java.time.Instant
 
-/**
- * Glue for the `graph-mail` demo case in `config/case/graph-mail/1-0-0`. Sandbox-app scaffolding
- * only — the plugin itself does not need it.
- *
- * It exists because the Graph Mail plugin takes its body and attachments as temporary resource
- * storage IDs rather than as process variables, and Valtimo ships no BPMN-callable bean that puts
- * content *into* that storage (`ResourceStorageDelegate` only reads and deletes). Without this the
- * demo processes could not produce a `contentId`.
- *
- * Registered under the bean name `graphMailDemo`, which is how the BPMN expressions address it.
- * `@ProcessBean` is what makes it addressable at all: Valtimo replaces Operaton's expression
- * manager with one backed by a whitelist (`OperatonWhitelistedBeansPlugin`), so a plain
- * `@Component` resolves to "Cannot resolve identifier" inside a BPMN expression.
- */
+// Sandbox-only glue for the `graph-mail` demo case: puts body and attachments into temporary resource storage.
 @ProcessBean
 @Component("graphMailDemo")
 class GraphMailDemoDelegate(
@@ -48,10 +35,7 @@ class GraphMailDemoDelegate(
 ) {
     private val logger = KotlinLogging.logger {}
 
-    /**
-     * Writes `doc:/bodyHtml` to temporary resource storage and returns the resource ID, which the
-     * BPMN captures in the `contentId` process variable.
-     */
+    // Stores `doc:/bodyHtml` and returns the resource ID for the `contentId` variable.
     fun storeBody(execution: DelegateExecution): String {
         val bodyHtml = resolve(execution, "doc:/bodyHtml") as? String ?: DEFAULT_BODY_HTML
         val contentId = store(bodyHtml.toByteArray(Charsets.UTF_8), "email-body.html", "text/html")
@@ -59,14 +43,7 @@ class GraphMailDemoDelegate(
         return contentId
     }
 
-    /**
-     * Generates the attachments configured on the case and returns their resource IDs as a comma
-     * separated string — one of the three formats the plugin's action property accepts.
-     *
-     * The filler file is sized from `doc:/attachments/largeFileSizeKb` so a single case can drive
-     * either send path: at or below 2 MB the plugin embeds the attachment in the `sendMail` body,
-     * above it the plugin creates a draft and uploads in chunks.
-     */
+    // Generates the case's attachments and returns their resource IDs comma separated.
     fun storeAttachments(execution: DelegateExecution): String {
         val ids = mutableListOf<String>()
 
@@ -83,10 +60,7 @@ class GraphMailDemoDelegate(
         return ids.joinToString(",")
     }
 
-    /**
-     * Records the outcome on the case. The plugin action returns nothing, so anything the case
-     * should show has to be written by the process (or derived from `GraphMailEmailSentEvent`).
-     */
+    // Records the outcome on the case; the plugin action itself returns nothing.
     fun recordDelivery(
         execution: DelegateExecution,
         status: String,
@@ -103,8 +77,7 @@ class GraphMailDemoDelegate(
         )
     }
 
-    // Optional document properties resolve to null when absent; a failure to resolve should not
-    // sink the demo process, so fall back to the same null and let the caller pick a default.
+    // Optional properties resolve to null when absent; never sink the demo process.
     private fun resolve(
         execution: DelegateExecution,
         key: String,
@@ -120,8 +93,7 @@ class GraphMailDemoDelegate(
     ): String =
         storageService.store(
             ByteArrayInputStream(bytes),
-            // MetadataType.FILE_NAME.key is "filename", not "fileName" — writing the wrong key
-            // leaves the plugin naming every attachment after its bare resource UUID.
+            // MetadataType.FILE_NAME.key is "filename", not "fileName".
             mapOf(
                 MetadataType.FILE_NAME.key to fileName,
                 MetadataType.CONTENT_TYPE.key to contentType,
@@ -147,10 +119,10 @@ class GraphMailDemoDelegate(
             "Voorwaarden\n" +
                 "===========\n\n" +
                 "Dit is een demo-bijlage van de Graph Mail plugin. Hij blijft ruim onder de\n" +
-                "drempel van 2 MB en gaat daarom inline mee in het sendMail-verzoek.\n"
+                "drempel van 3 MB en gaat daarom met een gewone POST mee.\n"
 
         const val FILLER_LINE =
             "Vulregel voor de grote demo-bijlage van de Graph Mail plugin. " +
-                "Boven 2 MB schakelt de plugin over op de upload-sessie.\n"
+                "Vanaf 3 MB schakelt de plugin over op de upload-sessie.\n"
     }
 }

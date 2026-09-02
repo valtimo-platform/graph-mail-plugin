@@ -28,7 +28,7 @@ class GraphMailAutoConfiguration {
     // Fired once after the full application context is ready.
     // Reminds operators to size the job-executor thread pool correctly: the plugin's
     // retry backoff uses Thread.sleep(), which blocks the calling job-executor thread
-    // for up to 30s (regular send) or 120s (upload-session flow for attachments > 2 MB).
+    // for up to 30s (regular send) or 120s (draft flow for attachments that don't fit inline).
     @EventListener(ApplicationReadyEvent::class)
     fun warnOnStartup() {
         logger.warn(

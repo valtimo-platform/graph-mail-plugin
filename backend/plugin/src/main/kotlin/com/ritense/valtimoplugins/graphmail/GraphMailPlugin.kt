@@ -88,10 +88,7 @@ private fun parseRecipients(
     }
 }
 
-// Derives a file extension from a MIME type: "application/pdf; charset=x" -> "pdf".
-// Only a plain alphanumeric subtype is accepted — structured subtypes such as
-// "vnd.openxmlformats-officedocument.wordprocessingml.document" are not usable as an
-// extension, so those yield null rather than a nonsense suffix.
+// Extension from a MIME type ("application/pdf" -> "pdf"); null for structured subtypes.
 private fun mimeExtension(contentType: String?): String? =
     contentType
         ?.substringBefore(';')
@@ -100,12 +97,7 @@ private fun mimeExtension(contentType: String?): String? =
         ?.takeIf { it.isNotEmpty() && it.all(Char::isLetterOrDigit) }
         ?.lowercase()
 
-// Resolves the name the recipient sees on the attachment.
-//
-// The metadata keys are owned by Valtimo's MetadataType enum — FILE_NAME.key is "filename"
-// (lower-case n), NOT "fileName". Reading the literal "fileName" silently returns null and
-// every attachment ends up named after its raw resource UUID, with no extension. Same
-// approach as the smtpmail plugin, which resolves these keys through MetadataType.
+// Attachment name from the storage metadata; keys come from MetadataType (FILE_NAME.key is "filename").
 internal fun resolveAttachmentFileName(metadata: Map<String, Any?>): String {
     val name = (metadata[MetadataType.FILE_NAME.key] as? String)?.trim()?.takeIf { it.isNotEmpty() }
     val extension = mimeExtension(metadata[MetadataType.CONTENT_TYPE.key] as? String)

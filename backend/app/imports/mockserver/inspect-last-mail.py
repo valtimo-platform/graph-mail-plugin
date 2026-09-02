@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Decode the most recent email the Graph Mail plugin sent to the MockServer dummy.
-
-The mock accepts and discards everything, so this reads MockServer's recorded request
-log instead and reconstructs the message: recipients, subject, the sanitised HTML body
-and every attachment — including the attachment file NAME, which is what
-resolveAttachmentFileName() produces from the Valtimo storage metadata.
-
-Usage:
-    ./inspect-last-mail.py                 # inspect the newest send
-    ./inspect-last-mail.py --all           # summarise every send in the log
-    ./inspect-last-mail.py --url http://localhost:1080
-"""
+"""Decode the most recent email the Graph Mail plugin sent to the MockServer dummy."""
 
 import argparse
 import base64
@@ -22,11 +11,11 @@ import tempfile
 import urllib.error
 import urllib.request
 
-# The inline path posts the whole message to sendMail; the upload-session path posts the
-# message (without attachments) to /messages and streams each attachment separately.
+# sendMail carries the whole message; the draft path posts the message then each attachment.
 SEND_MAIL_RE = re.compile(r"/v1\.0/users/[^/]+/sendMail")
 CREATE_DRAFT_RE = re.compile(r"/v1\.0/users/[^/]+/messages$")
 UPLOAD_SESSION_RE = re.compile(r"createUploadSession")
+ADD_ATTACHMENT_RE = re.compile(r"/v1\.0/users/[^/]+/messages/[^/]+/attachments$")
 
 
 def fetch_requests(base_url):
@@ -72,7 +61,7 @@ def describe(entry, outdir, index):
     payload = json.loads(raw)
     # sendMail wraps the message; createDraft posts the message object directly.
     message = payload.get("message", payload)
-    flow = "inline sendMail" if "message" in payload else "draft + upload session"
+    flow = "inline sendMail" if "message" in payload else "draft"
 
     print(f"\n=== send #{index} — {flow} ===")
     print(f"  path:      {entry.get('path')}")
@@ -94,8 +83,7 @@ def describe(entry, outdir, index):
         print(f"  attachments ({len(inline)}, inline base64):")
         for attachment in inline:
             content = base64.b64decode(attachment["contentBytes"])
-            # The name comes straight from the plugin's payload — that is the value under
-            # test. A bare UUID here means the storage metadata lookup missed.
+            # A bare UUID here means the storage metadata lookup missed.
             safe = pathlib.Path(attachment["name"]).name or "attachment"
             path = outdir / f"send-{index}-{safe}"
             path.write_bytes(content)
@@ -105,9 +93,32 @@ def describe(entry, outdir, index):
                 f"{len(content)} bytes -> {path}"
             )
     elif flow.startswith("draft"):
-        print("  attachments: streamed via upload session (see below)")
+        print("  attachments: added to the draft separately (see below)")
     else:
         print("  attachments: none")
+
+
+def describe_posted_attachments(entries, outdir):
+    """Attachments below the upload-session minimum, POSTed onto the draft one by one."""
+    posted = []
+    for entry in entries:
+        if ADD_ATTACHMENT_RE.search(entry.get("path", "")):
+            raw = body_text(entry)
+            if raw:
+                posted.append(json.loads(raw))
+    if not posted:
+        return
+    print("\n=== POST .../attachments requests (small files on the draft path) ===")
+    for index, attachment in enumerate(posted, start=1):
+        content = base64.b64decode(attachment.get("contentBytes") or "")
+        safe = pathlib.Path(attachment.get("name") or "attachment").name or "attachment"
+        path = outdir / f"draft-attachment-{index}-{safe}"
+        path.write_bytes(content)
+        print(
+            f"  - name={attachment.get('name')!r} "
+            f"type={attachment.get('contentType')!r} "
+            f"{len(content)} bytes -> {path}"
+        )
 
 
 def describe_upload_sessions(entries):
@@ -162,6 +173,7 @@ def main():
 
     for index, entry in enumerate(sends if args.all else sends[:1], start=1):
         describe(entry, outdir, index)
+    describe_posted_attachments(entries, outdir)
     describe_upload_sessions(entries)
     print(f"\nWrote body/attachments to {outdir}")
 

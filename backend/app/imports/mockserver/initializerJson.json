@@ -57,6 +57,26 @@
   {
     "httpRequest": {
       "method": "POST",
+      "path": "/v1\\.0/users/[^/]+/messages/[^/]+/attachments"
+    },
+    "httpResponse": {
+      "statusCode": 201,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "values": ["application/json"]
+        }
+      ],
+      "body": {
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        "id": "AAMkAD-dummy-attachment-id",
+        "isInline": false
+      }
+    }
+  },
+  {
+    "httpRequest": {
+      "method": "POST",
       "path": "/v1\\.0/users/[^/]+/messages/[^/]+/send"
     },
     "httpResponse": {

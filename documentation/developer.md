@@ -12,15 +12,16 @@ Voor het inrichten van de plugin via de beheerinterface: zie [handleiding.md](ha
 - Azure App Registration met een client secret (*Certificates & secrets*) en de
   applicatiemachtigingen:
   - `Mail.Send` — vereist voor alle e-mailverzendingen
-  - `Mail.ReadWrite` — vereist zodra één losse bijlage óf het totaal van alle bijlagen groter is
-    dan 2 MB (upload-sessie flow)
+  - `Mail.ReadWrite` — vereist zodra de plugin een concept moet aanmaken: bij een losse bijlage
+    van 3 MB of groter, óf wanneer alle bijlagen samen niet meer in één Graph-verzoek passen
+    (ruwweg 3 MB totaal, zie [Bijlagen](#bijlagen--twee-verzendpaden))
 
 Beide machtigingen zijn *applicatiemachtigingen* (niet delegated) en vereisen beheerdersconsent
 van een tenant-/Entra-beheerder.
 
-> Zonder `Mail.ReadWrite` mislukt de upload-sessie met een **403** zodra één losse bijlage óf het
-> totaal boven 2 MB komt. Voor mail zonder bijlagen — of waarbij zowel elke losse bijlage als het
-> totaal 2 MB of kleiner is — volstaat `Mail.Send`.
+> Zonder `Mail.ReadWrite` mislukt de conceptaanmaak met een **403** zodra de plugin die route
+> nodig heeft. Voor mail zonder bijlagen — of waarbij alle bijlagen samen in één verzoek
+> passen — volstaat `Mail.Send`.
 
 ## Plugin development
 
@@ -86,8 +87,8 @@ docker compose -f backend/app/docker-compose.yml up -d mockserver
 ```
 
 De stubs staan in `backend/app/imports/mockserver/initializerJson.json` en dekken het token-
-endpoint, de inline `sendMail` en de volledige upload-sessie flow (concept → createUploadSession
-→ chunked PUT → verzenden → concept opruimen).
+endpoint, de inline `sendMail` en de volledige conceptflow (concept → bijlage toevoegen met een
+gewone POST → createUploadSession → chunked PUT → verzenden → concept opruimen).
 
 ### De demo-dossierdefinitie
 
@@ -99,7 +100,7 @@ resultaat terug op het dossier (tab *Summary*).
 | Proces | Wat het laat zien |
 | --- | --- |
 | `graph-mail-send-email` | Basisverzending: afzender, to/cc/bcc/reply-to als komma-gescheiden lijst, onderwerp en HTML-body. De standaard-body bevat bewust een `<script>`-tag: die hoort door de sanitizer verwijderd te zijn in wat er daadwerkelijk verstuurd wordt. |
-| `graph-mail-send-email-with-attachments` | Genereert bijlagen in de temporary resource storage en geeft de resource-ID's komma-gescheiden door. De plugin kiest inline of upload-sessie **per bericht**, niet per bijlage: zodra één bijlage boven 2 MB uitkomt óf het totaal dat doet, gaan ze allemaal via de upload-sessie. Met de standaardwaarden (`grote-bijlage.txt` van 3072 KB) is dat het geval en gaat `voorwaarden.txt` dus mee door dezelfde flow. Zet het formaat op 1024 KB om beide bijlagen inline te krijgen. |
+| `graph-mail-send-email-with-attachments` | Genereert bijlagen in de temporary resource storage en geeft de resource-ID's komma-gescheiden door. De plugin kiest de route **per bijlage**. Met de standaardwaarden (`grote-bijlage.txt` van 3072 KB) gaat die ene bijlage via een upload-sessie en wordt `voorwaarden.txt` met een gewone POST aan hetzelfde concept gehangen. Zet het formaat op 1024 KB om beide bijlagen in één `sendMail` te krijgen. |
 
 Start een zaak via **Dossiers → Graph Mail → Nieuw**, of via de proceslijst.
 
@@ -249,10 +250,24 @@ E-mails uit de `send-email` actie worden opgeslagen in de Sent Items van de afze
 
 ### Bijlagen — twee verzendpaden
 
-Bijlagen gaan inline (base64) mee in de `sendMail`-aanroep zolang zowel elke losse bijlage als
-het totaal 2 MB of kleiner is. Zodra één losse bijlage óf het totaal daarboven komt, schakelt de
-plugin over op de Graph upload-sessie: concept aanmaken → chunked upload (3200 KiB per chunk) →
-verzenden. Mislukt dat halverwege, dan wordt het concept best-effort opgeruimd.
+De route wordt **per bijlage** bepaald, op basis van twee harde grenzen van de Graph API:
+
+- een upload-sessie geldt alleen voor bestanden van **3 MiB of groter** — daaronder weigert
+  `createUploadSession` met `ErrorAttachmentSizeShouldNotBeLessThanMinimumSize`;
+- een schrijfverzoek mag maximaal **4 MiB** groot zijn, en base64 maakt content 4/3 keer zo groot.
+
+Daaruit volgt:
+
+1. **Alles in één `sendMail`** — geen enkele bijlage is 3 MiB of groter én body plus
+   base64-bijlagen passen samen binnen de 4 MiB. Eén verzoek, `Mail.Send` volstaat.
+2. **Via een concept** — in alle andere gevallen. De plugin maakt een concept aan en hangt
+   daar elke bijlage afzonderlijk aan: bestanden onder 3 MiB met een gewone
+   `POST .../messages/{id}/attachments`, bestanden van 3 MiB en groter via een upload-sessie
+   met chunked upload (3200 KiB per chunk). Daarna wordt het concept verzonden. Mislukt dat
+   halverwege, dan wordt het concept best-effort opgeruimd.
+
+Een kleine bijlage gaat dus nooit door een upload-sessie, ook niet als er een grote bijlage in
+hetzelfde bericht zit.
 
 Bij de upload-sessie is het verzendtijdstip het moment van de definitieve verzendaanroep, niet
 het moment van conceptaanmaak.
@@ -325,7 +340,7 @@ verzending:
 | Situatie | Maximale blokkeertijd |
 | --- | --- |
 | Reguliere verzending (geen grote bijlagen) | 30 seconden |
-| Verzending via upload-sessie (bijlage > 2 MB) | 120 seconden |
+| Verzending via een concept (bijlagen passen niet in één verzoek) | 120 seconden |
 | 429 rate-limit sleep per poging (max) | 15 seconden |
 
 Als meerdere processen tegelijk e-mails versturen terwijl de Graph API rate-limiteert, kunnen

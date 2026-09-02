@@ -449,9 +449,7 @@ class GraphMailPluginTest {
         assertEquals("doc.pdf", captor.firstValue[0].name)
     }
 
-    // Regression: Valtimo stores the name under MetadataType.FILE_NAME.key, which is
-    // "filename" (lower-case n). Reading the literal "fileName" returned null and every
-    // attachment was named after its raw resource UUID, with no extension.
+    // Regression: Valtimo stores the name under "filename", not "fileName".
     @Test fun `uses Valtimo filename metadata key, not camelCase fileName`() {
         whenever(storage.getResourceMetadata(VALID_UUID)).thenReturn(
             mapOf("filename" to "brief.pdf", "contentType" to "application/pdf"),

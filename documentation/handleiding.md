@@ -41,7 +41,7 @@ Vraag daarnaast om deze machtigingen:
 | Machtiging | Wanneer nodig |
 | --- | --- |
 | `Mail.Send` | Altijd |
-| `Mail.ReadWrite` | Alleen als je bijlagen groter dan 2 MB verstuurt |
+| `Mail.ReadWrite` | Alleen als je bijlagen verstuurt die samen niet in één bericht passen (ruwweg vanaf 3 MB) |
 
 > **Belangrijk:** dit zijn *applicatiemachtigingen*. Een gewone gebruiker kan deze niet zelf
 > toekennen — een tenant-beheerder moet ze verlenen én er expliciet beheerdersconsent voor
@@ -192,10 +192,11 @@ Twee gevolgen voor wie templates maakt:
 Microsoft 365. Wil je dat de mail van "Gemeente — Vergunningen" komt, laat je beheerder dan de
 naam van de mailbox aanpassen in het Microsoft 365 Admin Center.
 
-**Grote bijlagen:** je hoeft hier niets voor in te stellen. Blijven alle bijlagen samen onder
-2 MB, dan gaan ze in één keer mee. Daarboven schakelt de plugin automatisch over op de
-route voor grote bestanden van Microsoft — dan is wel `Mail.ReadWrite` vereist. Deze route duurt
-merkbaar langer.
+**Grote bijlagen:** je hoeft hier niets voor in te stellen. Passen alle bijlagen samen in één
+bericht — ruwweg tot 3 MB in totaal — dan gaan ze in één keer mee. Daarboven schakelt de plugin
+automatisch over op de route voor grote bestanden van Microsoft, waarbij elke bijlage
+afzonderlijk wordt toegevoegd. Dan is wel `Mail.ReadWrite` vereist. Deze route duurt merkbaar
+langer.
 
 **Bezorging:** de plugin krijgt van Microsoft alleen terug dat de mail is *aangenomen*, niet dat
 hij is *bezorgd*. Een mail die daarna alsnog bounct, ziet Valtimo niet. Controleer bezorging in

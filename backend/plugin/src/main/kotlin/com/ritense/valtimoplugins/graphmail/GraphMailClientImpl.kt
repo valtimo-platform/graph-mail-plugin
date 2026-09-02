@@ -290,15 +290,24 @@ class GraphMailClientImpl(
             maskEmail(senderMailbox),
         )
 
-        val useDraftFlow =
-            attachments.any { it.sizeBytes > INLINE_ATTACHMENT_THRESHOLD_BYTES } ||
-                attachments.sumOf { it.sizeBytes } > INLINE_ATTACHMENT_THRESHOLD_BYTES
+        // Routing is per attachment, not per message: sub-minimum files must not use a session.
+        val needsUploadSession = attachments.any { it.sizeBytes >= UPLOAD_SESSION_MIN_BYTES }
+
+        // A single sendMail must also stay inside Graph's 4 MiB write limit.
+        val inlinePayloadBytes =
+            base64Length(attachments.sumOf { it.sizeBytes }) +
+                bodyHtml.toByteArray(Charsets.UTF_8).size.toLong() +
+                GRAPH_ENVELOPE_OVERHEAD_BYTES
+        val useDraftFlow = needsUploadSession || inlinePayloadBytes > MAX_GRAPH_WRITE_BYTES
 
         if (useDraftFlow) {
             logger.debug(
-                "Using draft+upload flow — {} attachment(s), total {} bytes",
+                "Using draft flow — {} attachment(s), total {} bytes, " +
+                    "upload session needed: {}, estimated inline payload: {} bytes",
                 attachments.size,
                 attachments.sumOf { it.sizeBytes },
+                needsUploadSession,
+                inlinePayloadBytes,
             )
             sendViaDraftAndUpload(
                 tenantId,
@@ -399,8 +408,26 @@ class GraphMailClientImpl(
 
         try {
             for (attachment in attachments) {
-                val uploadUrl =
-                    createUploadSession(
+                if (attachment.sizeBytes >= UPLOAD_SESSION_MIN_BYTES) {
+                    val uploadUrl =
+                        createUploadSession(
+                            tenantId,
+                            clientId,
+                            clientSecret,
+                            senderMailbox,
+                            draftId,
+                            attachment,
+                            deadline,
+                        )
+                    uploadInChunks(uploadUrl, attachment, deadline)
+                    logger.debug(
+                        "Attachment uploaded via session: name='{}' size={}",
+                        attachment.name,
+                        attachment.sizeBytes,
+                    )
+                } else {
+                    // Below the upload-session minimum: plain POST is the only route.
+                    addAttachmentWithRetry(
                         tenantId,
                         clientId,
                         clientSecret,
@@ -409,8 +436,12 @@ class GraphMailClientImpl(
                         attachment,
                         deadline,
                     )
-                uploadInChunks(uploadUrl, attachment, deadline)
-                logger.debug("Attachment uploaded: name='{}' size={}", attachment.name, attachment.sizeBytes)
+                    logger.debug(
+                        "Attachment posted inline on draft: name='{}' size={}",
+                        attachment.name,
+                        attachment.sizeBytes,
+                    )
+                }
             }
             sendDraftWithRetry(tenantId, clientId, clientSecret, senderMailbox, draftId, deadline)
         } catch (ex: Exception) {
@@ -513,6 +544,100 @@ class GraphMailClientImpl(
             } catch (ex: HttpServerErrorException) {
                 if (attempt >= MAX_RETRIES) {
                     throw GraphMailException("Graph API unavailable creating draft after $MAX_RETRIES attempts", ex)
+                }
+                val delay =
+                    (backoffMs + Random.nextLong(0, (backoffMs / 5).coerceAtLeast(1)))
+                        .coerceAtMost(deadline - System.currentTimeMillis())
+                if (delay > 0) Thread.sleep(delay)
+                backoffMs = (backoffMs * BACKOFF_MULTIPLIER).toLong()
+            }
+        }
+    }
+
+    // POSTs a sub-minimum attachment onto the draft; one request per file.
+    private fun addAttachmentWithRetry(
+        tenantId: String,
+        clientId: String,
+        clientSecret: String,
+        senderMailbox: String,
+        draftId: String,
+        attachment: ResolvedAttachment,
+        deadline: Long,
+    ) {
+        val uri: URI =
+            UriComponentsBuilder
+                .fromUriString("$graphBaseUrl/v1.0/users/{mailbox}/messages/{id}/attachments")
+                .buildAndExpand(senderMailbox, draftId)
+                .toUri()
+
+        val body =
+            GraphAttachment(
+                name = attachment.name,
+                contentType = attachment.contentType,
+                contentBytes = Base64.getEncoder().encodeToString(attachment.rawBytes),
+            )
+
+        var tokenRefreshed = false
+        var attempt = 0
+        var backoffMs = INITIAL_BACKOFF_MS
+
+        while (true) {
+            if (System.currentTimeMillis() > deadline) {
+                throw GraphMailException(
+                    "Attaching '${attachment.name}' timed out after ${MAX_DRAFT_SEND_WALL_CLOCK_MS}ms",
+                )
+            }
+            attempt++
+            val token = getAccessToken(tenantId, clientId, clientSecret)
+            try {
+                restClient
+                    .post()
+                    .uri(uri)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity()
+                return
+            } catch (ex: HttpClientErrorException) {
+                when (ex.statusCode.value()) {
+                    401 -> {
+                        if (tokenRefreshed) {
+                            throw GraphMailTokenExpiredException(
+                                "Token rejected when attaching file (401) — check Mail.ReadWrite permission",
+                                ex,
+                            )
+                        }
+                        invalidateCache(tenantId, clientId)
+                        tokenRefreshed = true
+                        attempt--
+                    }
+                    429 -> {
+                        if (attempt >= MAX_RETRIES) {
+                            throw GraphMailException(
+                                "Rate limited attaching '${attachment.name}' after $MAX_RETRIES attempts",
+                                ex,
+                            )
+                        }
+                        val wait =
+                            (
+                                parseRetryAfter(ex.responseHeaders?.getFirst("Retry-After"))
+                                    .coerceAtMost(MAX_RETRY_AFTER_SECONDS) * 1000
+                            ).coerceAtMost(deadline - System.currentTimeMillis())
+                        if (wait > 0) Thread.sleep(wait)
+                    }
+                    else -> throw GraphMailException(
+                        "Graph API rejected attachment '${attachment.name}' (${ex.statusCode})",
+                        ex,
+                        statusCode = ex.statusCode.value(),
+                    )
+                }
+            } catch (ex: HttpServerErrorException) {
+                if (attempt >= MAX_RETRIES) {
+                    throw GraphMailException(
+                        "Graph API unavailable attaching '${attachment.name}' after $MAX_RETRIES attempts",
+                        ex,
+                    )
                 }
                 val delay =
                     (backoffMs + Random.nextLong(0, (backoffMs / 5).coerceAtLeast(1)))

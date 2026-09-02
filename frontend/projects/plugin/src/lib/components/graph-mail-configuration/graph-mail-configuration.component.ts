@@ -129,11 +129,7 @@ export class GraphMailPluginConfigurationComponent
         )
         .subscribe(id => {
           this.savedConfigurationId = id;
-          // Both validity and test-section visibility depend on whether this is a saved
-          // configuration: an existing config keeps its stored secret, so an empty secret
-          // field is still valid. The id resolves asynchronously and usually lands after
-          // the prefill has already triggered formValueChange, so recompute here —
-          // otherwise Save stays disabled until the user happens to edit a field.
+          // Validity depends on this id, which lands after the prefill — so recompute.
           const formValue = this.formValue$.getValue();
           if (formValue) this.updateValidAndVisibility(formValue);
         });
