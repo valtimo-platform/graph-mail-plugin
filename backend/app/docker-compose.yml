@@ -71,5 +71,16 @@ services:
         rabbitmq-server
       "
 
+  mockserver:
+    container_name: plugin-docker-compose-mockserver
+    image: mockserver/mockserver:5.15.0
+    ports:
+      - "1080:1080"
+    environment:
+      - MOCKSERVER_INITIALIZATION_JSON_PATH=/config/initializerJson.json
+      - MOCKSERVER_WATCH_INITIALIZATION_JSON=false
+    volumes:
+      - ./imports/mockserver/initializerJson.json:/config/initializerJson.json
+
 volumes:
   plugin-database-data:

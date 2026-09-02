@@ -215,7 +215,7 @@ class GraphMailTestSendController(
                 </p>
               </div>
               <p style="font-size: 11px; color: #aaa; margin-top: 16px; text-align: center;">
-                Verzonden via Microsoft Graph API &middot; Graph Mail Plugin configuratietest &middot; ${'$'}escapedSender
+                Verzonden via Microsoft Graph API &middot; Graph Mail Plugin configuratietest &middot; $escapedSender
               </p>
             </body>
             </html>

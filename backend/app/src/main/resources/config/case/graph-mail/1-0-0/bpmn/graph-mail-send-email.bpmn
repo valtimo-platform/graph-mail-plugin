@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  id="Definitions_graph_mail_send_email"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  exporter="Camunda Modeler"
+                  exporterVersion="5.39.0">
+    <bpmn:process id="graph-mail-send-email" name="Graph Mail - send email" isExecutable="true" camunda:historyTimeToLive="P365D">
+        <bpmn:startEvent id="StartEvent_1" name="Message composed">
+            <bpmn:outgoing>Flow_start_store</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <!-- The plugin reads its body from temporary resource storage instead of a process
+             variable, so a mail body is never capped by the variable column size. This task
+             writes doc:/bodyHtml into storage and returns the resource ID. -->
+        <bpmn:serviceTask id="StoreBody" name="Store HTML body"
+                          camunda:expression="${graphMailDemo.storeBody(execution)}"
+                          camunda:resultVariable="contentId">
+            <bpmn:incoming>Flow_start_store</bpmn:incoming>
+            <bpmn:outgoing>Flow_store_send</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <!-- Plugin action, wired through graph-mail-send-email.process-link.json.
+             camunda:expression="${null}" is only there because BPMN requires an implementation
+             on a service task; the process link supplies the actual behaviour.
+
+             asyncBefore puts the send on the job executor, so a Graph outage becomes a job
+             failure rather than a failed form submission. Retries are capped at a single
+             attempt on purpose: the plugin has no idempotency guard, so an automatic retry
+             can deliver the same mail twice. One attempt, then an incident to act on. -->
+        <bpmn:serviceTask id="SendEmail" name="Send email via Microsoft Graph"
+                          camunda:expression="${null}"
+                          camunda:asyncBefore="true">
+            <bpmn:extensionElements>
+                <camunda:failedJobRetryTimeCycle>R1/PT10S</camunda:failedJobRetryTimeCycle>
+            </bpmn:extensionElements>
+            <bpmn:incoming>Flow_store_send</bpmn:incoming>
+            <bpmn:outgoing>Flow_send_record</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <!-- Only reached when the send task did not throw, so it records SENT. The plugin
+             action itself returns nothing; anything you want on the case has to be written
+             here or picked up from GraphMailEmailSentEvent. -->
+        <bpmn:serviceTask id="RecordDelivery" name="Record delivery on the case"
+                          camunda:expression="${graphMailDemo.recordDelivery(execution, 'SENT')}">
+            <bpmn:incoming>Flow_send_record</bpmn:incoming>
+            <bpmn:outgoing>Flow_record_end</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <bpmn:endEvent id="EndEvent_1" name="Email sent">
+            <bpmn:incoming>Flow_record_end</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="Flow_start_store" sourceRef="StartEvent_1" targetRef="StoreBody"/>
+        <bpmn:sequenceFlow id="Flow_store_send" sourceRef="StoreBody" targetRef="SendEmail"/>
+        <bpmn:sequenceFlow id="Flow_send_record" sourceRef="SendEmail" targetRef="RecordDelivery"/>
+        <bpmn:sequenceFlow id="Flow_record_end" sourceRef="RecordDelivery" targetRef="EndEvent_1"/>
+    </bpmn:process>
+    <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+        <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="graph-mail-send-email">
+            <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+                <dc:Bounds x="172" y="99" width="36" height="36"/>
+                <bpmndi:BPMNLabel>
+                    <dc:Bounds x="152" y="142" width="78" height="14"/>
+                </bpmndi:BPMNLabel>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="StoreBody_di" bpmnElement="StoreBody">
+                <dc:Bounds x="260" y="77" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="SendEmail_di" bpmnElement="SendEmail">
+                <dc:Bounds x="420" y="77" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="RecordDelivery_di" bpmnElement="RecordDelivery">
+                <dc:Bounds x="580" y="77" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="EndEvent_1_di" bpmnElement="EndEvent_1">
+                <dc:Bounds x="742" y="99" width="36" height="36"/>
+                <bpmndi:BPMNLabel>
+                    <dc:Bounds x="735" y="142" width="51" height="14"/>
+                </bpmndi:BPMNLabel>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNEdge id="Flow_start_store_di" bpmnElement="Flow_start_store">
+                <di:waypoint x="208" y="117"/>
+                <di:waypoint x="260" y="117"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Flow_store_send_di" bpmnElement="Flow_store_send">
+                <di:waypoint x="360" y="117"/>
+                <di:waypoint x="420" y="117"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Flow_send_record_di" bpmnElement="Flow_send_record">
+                <di:waypoint x="520" y="117"/>
+                <di:waypoint x="580" y="117"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Flow_record_end_di" bpmnElement="Flow_record_end">
+                <di:waypoint x="680" y="117"/>
+                <di:waypoint x="742" y="117"/>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+</bpmn:definitions>

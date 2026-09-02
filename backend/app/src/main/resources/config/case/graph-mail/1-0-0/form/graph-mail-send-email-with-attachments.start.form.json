@@ -1,0 +1,150 @@
+{
+    "display": "form",
+    "components": [
+        {
+            "key": "instructions",
+            "type": "htmlelement",
+            "input": false,
+            "tag": "p",
+            "content": "Same send, but the process first generates attachments in temporary resource storage and passes their IDs to the plugin. The plugin picks one path for the whole message: if any single attachment exceeds 2 MB, or all of them together do, every attachment goes through the upload session (draft &rarr; chunked upload &rarr; send). Otherwise they are all embedded inline in <code>sendMail</code>. Keep the filler above 2048 KB to exercise the upload-session path.",
+            "tableView": false,
+            "refreshOnChange": false
+        },
+        {
+            "key": "senderMailbox",
+            "type": "textfield",
+            "input": true,
+            "label": "From (mailbox)",
+            "tableView": true,
+            "applyMaskOn": "change",
+            "defaultValue": "noreply@example.com",
+            "validate": {
+                "required": true
+            },
+            "properties": {
+                "targetKey": "doc:/senderMailbox"
+            }
+        },
+        {
+            "key": "recipients",
+            "type": "textfield",
+            "input": true,
+            "label": "To",
+            "description": "One address, or several separated by a comma.",
+            "tableView": true,
+            "applyMaskOn": "change",
+            "defaultValue": "henk.example@example.com",
+            "validate": {
+                "required": true
+            },
+            "properties": {
+                "targetKey": "doc:/recipients"
+            }
+        },
+        {
+            "key": "cc",
+            "type": "textfield",
+            "input": true,
+            "label": "CC",
+            "tableView": false,
+            "applyMaskOn": "change",
+            "defaultValue": "",
+            "properties": {
+                "targetKey": "doc:/cc"
+            }
+        },
+        {
+            "key": "bcc",
+            "type": "textfield",
+            "input": true,
+            "label": "BCC",
+            "tableView": false,
+            "applyMaskOn": "change",
+            "defaultValue": "",
+            "properties": {
+                "targetKey": "doc:/bcc"
+            }
+        },
+        {
+            "key": "replyTo",
+            "type": "textfield",
+            "input": true,
+            "label": "Reply-To",
+            "tableView": false,
+            "applyMaskOn": "change",
+            "defaultValue": "",
+            "properties": {
+                "targetKey": "doc:/replyTo"
+            }
+        },
+        {
+            "key": "subject",
+            "type": "textfield",
+            "input": true,
+            "label": "Subject",
+            "tableView": true,
+            "applyMaskOn": "change",
+            "defaultValue": "Bijlagen bij uw aanvraag",
+            "validate": {
+                "required": true,
+                "maxLength": 255
+            },
+            "properties": {
+                "targetKey": "doc:/subject"
+            }
+        },
+        {
+            "key": "bodyHtml",
+            "type": "textarea",
+            "input": true,
+            "label": "Body (HTML)",
+            "rows": 8,
+            "tableView": false,
+            "applyMaskOn": "change",
+            "defaultValue": "<p>Beste ontvanger,</p>\n<p>In de bijlage vindt u de gevraagde documenten.</p>\n<p>Met vriendelijke groet,<br/>Team Communicatie</p>",
+            "validate": {
+                "required": true
+            },
+            "properties": {
+                "targetKey": "doc:/bodyHtml"
+            }
+        },
+        {
+            "key": "includeSmallFile",
+            "type": "checkbox",
+            "input": true,
+            "label": "Attach a small text file (voorwaarden.txt)",
+            "description": "A few hundred bytes. On its own it is base64-embedded in the sendMail request; alongside a filler that pushes the message over 2 MB it goes through the upload session too.",
+            "tableView": false,
+            "defaultValue": true,
+            "properties": {
+                "targetKey": "doc:/attachments/includeSmallFile"
+            }
+        },
+        {
+            "key": "largeFileSizeKb",
+            "type": "number",
+            "input": true,
+            "label": "Filler attachment size (KB)",
+            "description": "0 disables it. Above 2048 the plugin switches to the upload-session flow. The plugin rejects anything over 25600 KB.",
+            "tableView": false,
+            "defaultValue": 3072,
+            "validate": {
+                "min": 0,
+                "max": 25600,
+                "integer": true
+            },
+            "properties": {
+                "targetKey": "doc:/attachments/largeFileSizeKb"
+            }
+        },
+        {
+            "key": "submit",
+            "type": "button",
+            "input": true,
+            "label": "Send",
+            "tableView": false,
+            "disableOnInvalid": true
+        }
+    ]
+}

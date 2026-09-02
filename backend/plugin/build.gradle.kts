@@ -27,9 +27,11 @@ val kotlinLoggingVersion: String by project
 val mockitoKotlinVersion: String by project
 val valtimoVersion: String by project
 val operatonVersion: String by project
+val jsoupVersion: String by project
+val wiremockVersion: String by project
 
 configurations.testRuntimeClasspath {
-    resolutionStrategy.force("org.wiremock:wiremock:3.3.1")
+    resolutionStrategy.force("org.wiremock:wiremock:$wiremockVersion")
     exclude(group = "com.github.tomakehurst")
 }
 
@@ -43,7 +45,7 @@ dependencies {
     compileOnly("io.github.oshai:kotlin-logging:$kotlinLoggingVersion")
     compileOnly("com.ritense.valtimo:temporary-resource-storage")
     compileOnly("org.springframework.boot:spring-boot-starter-security")
-    implementation("org.jsoup:jsoup:1.17.2")
+    implementation("org.jsoup:jsoup:$jsoupVersion")
 
     // Testing
     testImplementation("com.ritense.valtimo:plugin-valtimo")
@@ -53,7 +55,7 @@ dependencies {
     testImplementation("com.ritense.valtimo:test-utils-common")
     testImplementation("com.ritense.valtimo:temporary-resource-storage")
     testImplementation("org.operaton.bpm:operaton-engine:$operatonVersion")
-    testImplementation("org.wiremock:wiremock-standalone:3.3.1")
+    testImplementation("org.wiremock:wiremock-standalone:$wiremockVersion")
     testImplementation("org.springframework.boot:spring-boot-starter-web")
     testImplementation("org.springframework.boot:spring-boot-starter-data-jpa")
     testImplementation("org.springframework.boot:spring-boot-starter-security")

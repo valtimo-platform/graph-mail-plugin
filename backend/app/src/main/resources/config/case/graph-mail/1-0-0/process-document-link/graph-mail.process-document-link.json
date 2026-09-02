@@ -1,0 +1,12 @@
+[
+    {
+        "processDefinitionKey": "graph-mail-send-email",
+        "canInitializeDocument": true,
+        "startableByUser": true
+    },
+    {
+        "processDefinitionKey": "graph-mail-send-email-with-attachments",
+        "canInitializeDocument": true,
+        "startableByUser": true
+    }
+]

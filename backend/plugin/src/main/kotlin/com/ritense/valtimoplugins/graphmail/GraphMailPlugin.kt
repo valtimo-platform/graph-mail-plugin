@@ -6,6 +6,7 @@ import com.ritense.plugin.annotation.PluginAction
 import com.ritense.plugin.annotation.PluginActionProperty
 import com.ritense.plugin.annotation.PluginProperty
 import com.ritense.processlink.domain.ActivityTypeWithEventName
+import com.ritense.resource.domain.MetadataType
 import com.ritense.resource.service.TemporaryResourceStorageService
 import org.jsoup.Jsoup
 import org.jsoup.safety.Safelist
@@ -84,6 +85,37 @@ private fun parseRecipients(
         requireNoControlChars(address, fieldName)
         require(isValidEmail(address)) { "Invalid email address in '$fieldName': '$address'" }
         GraphRecipient(GraphEmailAddress(address = address))
+    }
+}
+
+// Derives a file extension from a MIME type: "application/pdf; charset=x" -> "pdf".
+// Only a plain alphanumeric subtype is accepted — structured subtypes such as
+// "vnd.openxmlformats-officedocument.wordprocessingml.document" are not usable as an
+// extension, so those yield null rather than a nonsense suffix.
+private fun mimeExtension(contentType: String?): String? =
+    contentType
+        ?.substringBefore(';')
+        ?.trim()
+        ?.substringAfterLast('/')
+        ?.takeIf { it.isNotEmpty() && it.all(Char::isLetterOrDigit) }
+        ?.lowercase()
+
+// Resolves the name the recipient sees on the attachment.
+//
+// The metadata keys are owned by Valtimo's MetadataType enum — FILE_NAME.key is "filename"
+// (lower-case n), NOT "fileName". Reading the literal "fileName" silently returns null and
+// every attachment ends up named after its raw resource UUID, with no extension. Same
+// approach as the smtpmail plugin, which resolves these keys through MetadataType.
+internal fun resolveAttachmentFileName(metadata: Map<String, Any?>): String {
+    val name = (metadata[MetadataType.FILE_NAME.key] as? String)?.trim()?.takeIf { it.isNotEmpty() }
+    val extension = mimeExtension(metadata[MetadataType.CONTENT_TYPE.key] as? String)
+    return when {
+        // Already carries an extension — use it verbatim.
+        name != null && name.contains('.') -> name
+        name != null && extension != null -> "$name.$extension"
+        name != null -> name
+        extension != null -> "attachment.$extension"
+        else -> "attachment"
     }
 }
 
@@ -320,8 +352,8 @@ class GraphMailPlugin(
             }
 
             val metadata = resourceStorageService.getResourceMetadata(resourceId)
-            val fileName = metadata["fileName"] as? String ?: resourceId
-            val contentType = metadata["contentType"] as? String ?: "application/octet-stream"
+            val fileName = resolveAttachmentFileName(metadata)
+            val contentType = metadata[MetadataType.CONTENT_TYPE.key] as? String ?: "application/octet-stream"
 
             val raw =
                 resourceStorageService.getResourceContentAsInputStream(resourceId)

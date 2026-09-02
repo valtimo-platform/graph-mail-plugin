@@ -1,0 +1,15 @@
+[
+  {
+    "id": "4d1c8f5e-6b21-4a7f-9c3d-8e0a1b2c3d4e",
+    "title": "Graph Mail (dummy)",
+    "pluginDefinitionKey": "entra",
+    "properties": {
+      "tenantId": "${GRAPH_MAIL_TENANT_ID:00000000-0000-0000-0000-000000000001}",
+      "clientId": "${GRAPH_MAIL_CLIENT_ID:00000000-0000-0000-0000-000000000002}",
+      "clientSecret": "${GRAPH_MAIL_CLIENT_SECRET:dummy-client-secret}",
+      "testSenderMailbox": "${GRAPH_MAIL_SENDER:noreply@example.com}",
+      "tokenBaseUrl": "${GRAPH_MAIL_TOKEN_BASE_URL:http://localhost:1080}",
+      "graphBaseUrl": "${GRAPH_MAIL_BASE_URL:http://localhost:1080}"
+    }
+  }
+]

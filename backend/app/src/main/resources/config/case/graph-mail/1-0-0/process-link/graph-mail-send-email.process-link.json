@@ -1,0 +1,29 @@
+[
+    {
+        "activityId": "StartEvent_1",
+        "activityType": "bpmn:StartEvent:start",
+        "processLinkType": "form",
+        "formDefinitionName": "graph-mail-send-email.start",
+        "viewModelEnabled": false,
+        "formDisplayType": "modal",
+        "formSize": "large",
+        "subtitles": []
+    },
+    {
+        "activityId": "SendEmail",
+        "activityType": "bpmn:ServiceTask:start",
+        "processLinkType": "plugin",
+        "pluginConfigurationId": "4d1c8f5e-6b21-4a7f-9c3d-8e0a1b2c3d4e",
+        "pluginActionDefinitionKey": "send-email",
+        "actionProperties": {
+            "senderMailbox": "doc:/senderMailbox",
+            "recipients": "doc:/recipients",
+            "cc": "doc:/cc",
+            "bcc": "doc:/bcc",
+            "replyTo": "doc:/replyTo",
+            "subject": "doc:/subject",
+            "contentId": "pv:contentId",
+            "attachmentIds": null
+        }
+    }
+]

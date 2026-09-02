@@ -1,0 +1,126 @@
+{
+    "display": "form",
+    "components": [
+        {
+            "key": "instructions",
+            "type": "htmlelement",
+            "input": false,
+            "tag": "p",
+            "content": "Sends one message through the Microsoft Graph <code>sendMail</code> endpoint. In the dev stack this hits the MockServer on port 1080 — run <code>backend/app/imports/mockserver/inspect-last-mail.py</code> afterwards to see the exact payload that left the plugin.",
+            "tableView": false,
+            "refreshOnChange": false
+        },
+        {
+            "key": "senderMailbox",
+            "type": "textfield",
+            "input": true,
+            "label": "From (mailbox)",
+            "description": "Must be a mailbox the app registration may send as (Mail.Send).",
+            "tableView": true,
+            "applyMaskOn": "change",
+            "defaultValue": "noreply@example.com",
+            "validate": {
+                "required": true
+            },
+            "properties": {
+                "targetKey": "doc:/senderMailbox"
+            }
+        },
+        {
+            "key": "recipients",
+            "type": "textfield",
+            "input": true,
+            "label": "To",
+            "description": "One address, or several separated by a comma. At least one is required.",
+            "tableView": true,
+            "applyMaskOn": "change",
+            "defaultValue": "henk.example@example.com,ingrid.example@example.com",
+            "validate": {
+                "required": true
+            },
+            "properties": {
+                "targetKey": "doc:/recipients"
+            }
+        },
+        {
+            "key": "cc",
+            "type": "textfield",
+            "input": true,
+            "label": "CC",
+            "description": "Optional, comma separated.",
+            "tableView": false,
+            "applyMaskOn": "change",
+            "defaultValue": "",
+            "properties": {
+                "targetKey": "doc:/cc"
+            }
+        },
+        {
+            "key": "bcc",
+            "type": "textfield",
+            "input": true,
+            "label": "BCC",
+            "description": "Optional, comma separated.",
+            "tableView": false,
+            "applyMaskOn": "change",
+            "defaultValue": "",
+            "properties": {
+                "targetKey": "doc:/bcc"
+            }
+        },
+        {
+            "key": "replyTo",
+            "type": "textfield",
+            "input": true,
+            "label": "Reply-To",
+            "description": "Optional. These addresses do not receive the message.",
+            "tableView": false,
+            "applyMaskOn": "change",
+            "defaultValue": "",
+            "properties": {
+                "targetKey": "doc:/replyTo"
+            }
+        },
+        {
+            "key": "subject",
+            "type": "textfield",
+            "input": true,
+            "label": "Subject",
+            "tableView": true,
+            "applyMaskOn": "change",
+            "defaultValue": "Uitnodiging informatiebijeenkomst",
+            "validate": {
+                "required": true,
+                "maxLength": 255
+            },
+            "properties": {
+                "targetKey": "doc:/subject"
+            }
+        },
+        {
+            "key": "bodyHtml",
+            "type": "textarea",
+            "input": true,
+            "label": "Body (HTML)",
+            "description": "The plugin sanitises this before sending. The script tag below is deliberately included — it must not show up in the sent message.",
+            "rows": 14,
+            "tableView": false,
+            "applyMaskOn": "change",
+            "defaultValue": "<h2>Informatiebijeenkomst</h2>\n<p>Beste ontvanger,</p>\n<p>Hierbij nodigen wij u uit voor de informatiebijeenkomst.</p>\n<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\">\n  <tr><th align=\"left\">Datum</th><td>12 maart, 19:30</td></tr>\n  <tr><th align=\"left\">Locatie</th><td>Stadhuis, zaal 2</td></tr>\n</table>\n<p><a href=\"https://example.com/aanmelden\">Aanmelden</a></p>\n<script>alert('stripped by the plugin');</script>\n<p style=\"color:#666666\">Met vriendelijke groet,<br/>Team Communicatie</p>",
+            "validate": {
+                "required": true
+            },
+            "properties": {
+                "targetKey": "doc:/bodyHtml"
+            }
+        },
+        {
+            "key": "submit",
+            "type": "button",
+            "input": true,
+            "label": "Send",
+            "tableView": false,
+            "disableOnInvalid": true
+        }
+    ]
+}

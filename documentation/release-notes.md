@@ -2,6 +2,12 @@
 
 Overzicht van wijzigingen per versie van de Graph Mail-plugin.
 
+## 1.0.3
+
+- Bijlagen krijgen weer hun oorspronkelijke bestandsnaam.
+- De testmail toont het afzenderadres in de voettekst.
+- Bij het openen van een bestaande pluginconfiguratie is *Opslaan* direct beschikbaar.
+
 ## 1.0.2
 
 Valtimo bijgewerkt naar versie 13.41.0.

@@ -15,6 +15,7 @@
  */
 package com.ritense.valtimoplugins.graphmail
 
+import com.ritense.resource.domain.MetadataType
 import com.ritense.resource.service.TemporaryResourceStorageService
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
@@ -420,7 +421,10 @@ class GraphMailPluginTest {
 
     @Test fun `resolves attachments from storage`() {
         whenever(storage.getResourceMetadata(VALID_UUID)).thenReturn(
-            mapOf("fileName" to "doc.pdf", "contentType" to "application/pdf"),
+            mapOf(
+                MetadataType.FILE_NAME.key to "doc.pdf",
+                MetadataType.CONTENT_TYPE.key to "application/pdf",
+            ),
         )
         whenever(storage.getResourceContentAsInputStream(VALID_UUID))
             .thenReturn(ByteArrayInputStream("data".toByteArray()))
@@ -443,6 +447,96 @@ class GraphMailPluginTest {
         )
         assertEquals(1, captor.firstValue.size)
         assertEquals("doc.pdf", captor.firstValue[0].name)
+    }
+
+    // Regression: Valtimo stores the name under MetadataType.FILE_NAME.key, which is
+    // "filename" (lower-case n). Reading the literal "fileName" returned null and every
+    // attachment was named after its raw resource UUID, with no extension.
+    @Test fun `uses Valtimo filename metadata key, not camelCase fileName`() {
+        whenever(storage.getResourceMetadata(VALID_UUID)).thenReturn(
+            mapOf("filename" to "brief.pdf", "contentType" to "application/pdf"),
+        )
+        whenever(storage.getResourceContentAsInputStream(VALID_UUID))
+            .thenReturn(ByteArrayInputStream("data".toByteArray()))
+
+        val captor = argumentCaptor<List<ResolvedAttachment>>()
+        send(attachments = VALID_UUID)
+        verify(mailClient).sendMail(
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            captor.capture(),
+            any(),
+        )
+        assertEquals("brief.pdf", captor.firstValue[0].name)
+    }
+
+    @Test fun `filename with extension is used verbatim`() {
+        assertEquals(
+            "doc.pdf",
+            resolveAttachmentFileName(
+                mapOf(
+                    MetadataType.FILE_NAME.key to "doc.pdf",
+                    MetadataType.CONTENT_TYPE.key to "application/pdf",
+                ),
+            ),
+        )
+    }
+
+    @Test fun `extension is derived from content type when filename has none`() {
+        assertEquals(
+            "doc.pdf",
+            resolveAttachmentFileName(
+                mapOf(
+                    MetadataType.FILE_NAME.key to "doc",
+                    MetadataType.CONTENT_TYPE.key to "application/pdf; charset=utf-8",
+                ),
+            ),
+        )
+    }
+
+    @Test fun `structured content type subtype is not used as an extension`() {
+        val docx =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        assertEquals(
+            "verslag",
+            resolveAttachmentFileName(
+                mapOf(
+                    MetadataType.FILE_NAME.key to "verslag",
+                    MetadataType.CONTENT_TYPE.key to docx,
+                ),
+            ),
+        )
+    }
+
+    @Test fun `falls back to attachment plus extension when filename is missing`() {
+        assertEquals(
+            "attachment.png",
+            resolveAttachmentFileName(mapOf(MetadataType.CONTENT_TYPE.key to "image/png")),
+        )
+    }
+
+    @Test fun `falls back to attachment when no metadata is present`() {
+        assertEquals("attachment", resolveAttachmentFileName(emptyMap()))
+    }
+
+    @Test fun `blank filename metadata falls back`() {
+        assertEquals(
+            "attachment.pdf",
+            resolveAttachmentFileName(
+                mapOf(
+                    MetadataType.FILE_NAME.key to "   ",
+                    MetadataType.CONTENT_TYPE.key to "application/pdf",
+                ),
+            ),
+        )
     }
 
     @Test fun `empty attachments when ids null`() {
@@ -468,7 +562,10 @@ class GraphMailPluginTest {
     @Test fun `accepts attachment up to 25 MB`() {
         val bigBytes = ByteArray(MAX_SINGLE_ATTACHMENT_BYTES.toInt())
         whenever(storage.getResourceMetadata(VALID_UUID)).thenReturn(
-            mapOf("fileName" to "large.bin", "contentType" to "application/octet-stream"),
+            mapOf(
+                MetadataType.FILE_NAME.key to "large.bin",
+                MetadataType.CONTENT_TYPE.key to "application/octet-stream",
+            ),
         )
         whenever(storage.getResourceContentAsInputStream(VALID_UUID))
             .thenReturn(ByteArrayInputStream(bigBytes))
@@ -489,7 +586,10 @@ class GraphMailPluginTest {
     @Test fun `rejects single attachment exceeding size cap`() {
         val oversized = ByteArray((MAX_SINGLE_ATTACHMENT_BYTES + 1).toInt())
         whenever(storage.getResourceMetadata(VALID_UUID)).thenReturn(
-            mapOf("fileName" to "big.bin", "contentType" to "application/octet-stream"),
+            mapOf(
+                MetadataType.FILE_NAME.key to "big.bin",
+                MetadataType.CONTENT_TYPE.key to "application/octet-stream",
+            ),
         )
         whenever(storage.getResourceContentAsInputStream(VALID_UUID))
             .thenReturn(ByteArrayInputStream(oversized))

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  id="Definitions_graph_mail_send_email_with_attachments"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  exporter="Camunda Modeler"
+                  exporterVersion="5.39.0">
+    <bpmn:process id="graph-mail-send-email-with-attachments" name="Graph Mail - send email with attachments"
+                  isExecutable="true" camunda:historyTimeToLive="P365D">
+        <bpmn:startEvent id="StartEvent_1" name="Message composed">
+            <bpmn:outgoing>Flow_start_store</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <bpmn:serviceTask id="StoreBody" name="Store HTML body"
+                          camunda:expression="${graphMailDemo.storeBody(execution)}"
+                          camunda:resultVariable="contentId">
+            <bpmn:incoming>Flow_start_store</bpmn:incoming>
+            <bpmn:outgoing>Flow_store_attach</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <!-- Stands in for whatever produces attachments in a real process (Documenten API
+             download, a generated PDF, an upload task). What matters for the plugin is the
+             shape of the result: temporary resource storage IDs, comma separated.
+
+             The plugin decides inline vs. upload session per message, not per attachment:
+             one attachment over 2 MB, or a total over 2 MB, routes all of them through the
+             upload session. -->
+        <bpmn:serviceTask id="StoreAttachments" name="Generate attachments"
+                          camunda:expression="${graphMailDemo.storeAttachments(execution)}"
+                          camunda:resultVariable="attachmentIds">
+            <bpmn:incoming>Flow_store_attach</bpmn:incoming>
+            <bpmn:outgoing>Flow_attach_send</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <!-- See graph-mail-send-email.bpmn for why this is asyncBefore with a single retry.
+             Large attachments make that more relevant, not less: the upload-session flow
+             backs off for up to two minutes and blocks its job executor thread while it does. -->
+        <bpmn:serviceTask id="SendEmail" name="Send email via Microsoft Graph"
+                          camunda:expression="${null}"
+                          camunda:asyncBefore="true">
+            <bpmn:extensionElements>
+                <camunda:failedJobRetryTimeCycle>R1/PT10S</camunda:failedJobRetryTimeCycle>
+            </bpmn:extensionElements>
+            <bpmn:incoming>Flow_attach_send</bpmn:incoming>
+            <bpmn:outgoing>Flow_send_record</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <bpmn:serviceTask id="RecordDelivery" name="Record delivery on the case"
+                          camunda:expression="${graphMailDemo.recordDelivery(execution, 'SENT')}">
+            <bpmn:incoming>Flow_send_record</bpmn:incoming>
+            <bpmn:outgoing>Flow_record_end</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <bpmn:endEvent id="EndEvent_1" name="Email sent">
+            <bpmn:incoming>Flow_record_end</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="Flow_start_store" sourceRef="StartEvent_1" targetRef="StoreBody"/>
+        <bpmn:sequenceFlow id="Flow_store_attach" sourceRef="StoreBody" targetRef="StoreAttachments"/>
+        <bpmn:sequenceFlow id="Flow_attach_send" sourceRef="StoreAttachments" targetRef="SendEmail"/>
+        <bpmn:sequenceFlow id="Flow_send_record" sourceRef="SendEmail" targetRef="RecordDelivery"/>
+        <bpmn:sequenceFlow id="Flow_record_end" sourceRef="RecordDelivery" targetRef="EndEvent_1"/>
+    </bpmn:process>
+    <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+        <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="graph-mail-send-email-with-attachments">
+            <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+                <dc:Bounds x="172" y="99" width="36" height="36"/>
+                <bpmndi:BPMNLabel>
+                    <dc:Bounds x="152" y="142" width="78" height="14"/>
+                </bpmndi:BPMNLabel>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="StoreBody_di" bpmnElement="StoreBody">
+                <dc:Bounds x="260" y="77" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="StoreAttachments_di" bpmnElement="StoreAttachments">
+                <dc:Bounds x="420" y="77" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="SendEmail_di" bpmnElement="SendEmail">
+                <dc:Bounds x="580" y="77" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="RecordDelivery_di" bpmnElement="RecordDelivery">
+                <dc:Bounds x="740" y="77" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="EndEvent_1_di" bpmnElement="EndEvent_1">
+                <dc:Bounds x="902" y="99" width="36" height="36"/>
+                <bpmndi:BPMNLabel>
+                    <dc:Bounds x="895" y="142" width="51" height="14"/>
+                </bpmndi:BPMNLabel>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNEdge id="Flow_start_store_di" bpmnElement="Flow_start_store">
+                <di:waypoint x="208" y="117"/>
+                <di:waypoint x="260" y="117"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Flow_store_attach_di" bpmnElement="Flow_store_attach">
+                <di:waypoint x="360" y="117"/>
+                <di:waypoint x="420" y="117"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Flow_attach_send_di" bpmnElement="Flow_attach_send">
+                <di:waypoint x="520" y="117"/>
+                <di:waypoint x="580" y="117"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Flow_send_record_di" bpmnElement="Flow_send_record">
+                <di:waypoint x="680" y="117"/>
+                <di:waypoint x="740" y="117"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Flow_record_end_di" bpmnElement="Flow_record_end">
+                <di:waypoint x="840" y="117"/>
+                <di:waypoint x="902" y="117"/>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+</bpmn:definitions>

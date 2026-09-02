@@ -1,0 +1,75 @@
+{
+    "$id": "graph-mail.schema",
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Graph Mail",
+    "type": "object",
+    "properties": {
+        "senderMailbox": {
+            "type": "string",
+            "description": "Mailbox the message is sent from. Must be a mailbox the app registration is allowed to send as."
+        },
+        "recipients": {
+            "type": "string",
+            "description": "To addresses. Single address, or several separated by a comma."
+        },
+        "cc": {
+            "type": "string",
+            "description": "CC addresses, comma separated. Leave empty to omit."
+        },
+        "bcc": {
+            "type": "string",
+            "description": "BCC addresses, comma separated. Leave empty to omit."
+        },
+        "replyTo": {
+            "type": "string",
+            "description": "Reply-To addresses, comma separated. These do not receive the message."
+        },
+        "subject": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Subject line. The plugin rejects subjects longer than 255 characters."
+        },
+        "bodyHtml": {
+            "type": "string",
+            "description": "HTML body. The plugin sanitises this before sending — scripts and style blocks are stripped."
+        },
+        "attachments": {
+            "type": "object",
+            "description": "Knobs for the demo attachment generator; a real process would use resource IDs from the Documenten API or an upload task.",
+            "properties": {
+                "includeSmallFile": {
+                    "type": "boolean",
+                    "description": "Attach a small text file of a few hundred bytes."
+                },
+                "largeFileSizeKb": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 25600,
+                    "description": "Size of a generated filler attachment in KB. 0 disables it. The plugin chooses inline vs. upload session per message: any single attachment over 2 MB, or a total over 2 MB, sends all of them through the upload session."
+                }
+            }
+        },
+        "delivery": {
+            "type": "object",
+            "description": "Written by the process after the send task completes.",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "description": "SENT once the plugin action returned without error."
+                },
+                "sentAt": {
+                    "type": "string",
+                    "description": "UTC timestamp of the moment the process recorded the result."
+                },
+                "contentId": {
+                    "type": "string",
+                    "description": "Temporary resource storage ID that held the HTML body."
+                },
+                "attachmentIds": {
+                    "type": "string",
+                    "description": "Comma separated temporary resource storage IDs that were attached."
+                }
+            }
+        }
+    }
+}

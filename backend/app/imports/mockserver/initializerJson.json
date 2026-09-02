@@ -1,0 +1,113 @@
+[
+  {
+    "httpRequest": {
+      "method": "POST",
+      "path": "/[^/]+/oauth2/v2\\.0/token"
+    },
+    "httpResponse": {
+      "statusCode": 200,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "values": ["application/json"]
+        }
+      ],
+      "body": {
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "ext_expires_in": 3600,
+        "access_token": "dummy.access.token"
+      }
+    }
+  },
+  {
+    "httpRequest": {
+      "method": "POST",
+      "path": "/v1\\.0/users/[^/]+/sendMail",
+      "headers": [
+        {
+          "name": "Authorization",
+          "values": ["Bearer .+"]
+        }
+      ]
+    },
+    "httpResponse": {
+      "statusCode": 202
+    }
+  },
+  {
+    "httpRequest": {
+      "method": "POST",
+      "path": "/v1\\.0/users/[^/]+/messages/[^/]+/attachments/createUploadSession"
+    },
+    "httpResponse": {
+      "statusCode": 201,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "values": ["application/json"]
+        }
+      ],
+      "body": {
+        "uploadUrl": "http://localhost:1080/upload-session/dummy",
+        "expirationDateTime": "2099-01-01T00:00:00.000Z"
+      }
+    }
+  },
+  {
+    "httpRequest": {
+      "method": "POST",
+      "path": "/v1\\.0/users/[^/]+/messages/[^/]+/send"
+    },
+    "httpResponse": {
+      "statusCode": 202
+    }
+  },
+  {
+    "httpRequest": {
+      "method": "DELETE",
+      "path": "/v1\\.0/users/[^/]+/messages/[^/]+"
+    },
+    "httpResponse": {
+      "statusCode": 204
+    }
+  },
+  {
+    "httpRequest": {
+      "method": "POST",
+      "path": "/v1\\.0/users/[^/]+/messages"
+    },
+    "httpResponse": {
+      "statusCode": 201,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "values": ["application/json"]
+        }
+      ],
+      "body": {
+        "id": "AAMkAD-dummy-draft-id",
+        "isDraft": true
+      }
+    }
+  },
+  {
+    "httpRequest": {
+      "method": "PUT",
+      "path": "/upload-session/.*"
+    },
+    "httpResponse": {
+      "statusCode": 200,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "values": ["application/json"]
+        }
+      ],
+      "body": {
+        "expirationDateTime": "2099-01-01T00:00:00.000Z",
+        "nextExpectedRanges": []
+      }
+    }
+  }
+]

@@ -1,0 +1,127 @@
+[
+    {
+        "key": "summary",
+        "widgets": [
+            {
+                "type": "fields",
+                "key": "message",
+                "title": "Message",
+                "width": 2,
+                "highContrast": false,
+                "properties": {
+                    "columns": [
+                        [
+                            {
+                                "key": "senderMailbox",
+                                "title": "From",
+                                "value": "doc:/senderMailbox",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": false
+                                }
+                            },
+                            {
+                                "key": "recipients",
+                                "title": "To",
+                                "value": "doc:/recipients",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": false
+                                }
+                            },
+                            {
+                                "key": "subject",
+                                "title": "Subject",
+                                "value": "doc:/subject",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": false
+                                }
+                            }
+                        ],
+                        [
+                            {
+                                "key": "cc",
+                                "title": "CC",
+                                "value": "doc:/cc",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": true
+                                }
+                            },
+                            {
+                                "key": "bcc",
+                                "title": "BCC",
+                                "value": "doc:/bcc",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": true
+                                }
+                            },
+                            {
+                                "key": "replyTo",
+                                "title": "Reply-To",
+                                "value": "doc:/replyTo",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": true
+                                }
+                            }
+                        ]
+                    ]
+                }
+            },
+            {
+                "type": "fields",
+                "key": "delivery",
+                "title": "Delivery",
+                "width": 2,
+                "highContrast": false,
+                "properties": {
+                    "columns": [
+                        [
+                            {
+                                "key": "status",
+                                "title": "Status",
+                                "value": "doc:/delivery/status",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": false
+                                }
+                            },
+                            {
+                                "key": "sentAt",
+                                "title": "Sent at",
+                                "value": "doc:/delivery/sentAt",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": true
+                                }
+                            }
+                        ],
+                        [
+                            {
+                                "key": "contentId",
+                                "title": "Body resource ID",
+                                "value": "doc:/delivery/contentId",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": true
+                                }
+                            },
+                            {
+                                "key": "attachmentIds",
+                                "title": "Attachment resource IDs",
+                                "value": "doc:/delivery/attachmentIds",
+                                "displayProperties": {
+                                    "type": "text",
+                                    "hideWhenEmpty": true
+                                }
+                            }
+                        ]
+                    ]
+                }
+            }
+        ]
+    }
+]

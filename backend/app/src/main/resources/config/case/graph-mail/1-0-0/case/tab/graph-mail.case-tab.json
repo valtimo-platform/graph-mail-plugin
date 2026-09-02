@@ -1,0 +1,23 @@
+[
+    {
+        "key": "summary",
+        "name": "Summary",
+        "type": "widgets",
+        "contentKey": "-",
+        "showTasks": false
+    },
+    {
+        "key": "progress",
+        "name": "Progress",
+        "type": "standard",
+        "contentKey": "progress",
+        "showTasks": false
+    },
+    {
+        "key": "audit",
+        "name": "Audit",
+        "type": "standard",
+        "contentKey": "audit",
+        "showTasks": false
+    }
+]

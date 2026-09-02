@@ -1,6 +1,6 @@
 services:
   db:
     ports:
-      - "54342:5432"
+      - "54368:5432"
     environment:
-      - POSTGRES_DB=sample-plugin-test
+      - POSTGRES_DB=graph-mail-test
