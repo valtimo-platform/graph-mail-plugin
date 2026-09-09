@@ -31,7 +31,7 @@ jobs:
       matrix: ${{ steps.changed-files.outputs.all_changed_files }}
       any_changed: ${{ steps.changed-files.outputs.any_changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # OR "2" -> To retrieve the preceding commit.
 
@@ -61,7 +61,7 @@ jobs:
     name: Build and publish
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
