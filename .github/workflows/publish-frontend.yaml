@@ -36,8 +36,12 @@ jobs:
           dir_names_max_depth: '1'
           matrix: 'true'
           path: 'frontend/projects'
-        uses: tj-actions/changed-files@v45
+        uses: tj-actions/changed-files@48d8f15b2aaa3d255ca5af3eba4870f807ce6b3c # v45.0.2
       # NOTE: `since_last_remote_commit: true` is implied by default and falls back to the previous local commit.
+      #
+      # tj-actions/changed-files is pinned to a commit SHA, not a mutable tag. This action's tags
+      # were compromised in March 2025 (CVE-2025-30066) to dump CI secrets into workflow logs —
+      # pinning by SHA means a future tag re-point can't silently change what code runs here.
 
   Build-and-publish:
     if: needs.changed_files.outputs.any_changed == 'true'
@@ -61,13 +65,25 @@ jobs:
       - run: npm install
         working-directory: frontend
 
-      - run: npm run build --workspace=projects/${{ matrix.value }}
+      # CHANGED_DIR (matrix.value) is directory-name content from the changed-files diff — never
+      # interpolate it directly into a `run:` script or into a Node.js source string with ${{ }},
+      # which substitutes as literal text before the shell/JS parses it (script injection). Always
+      # pass it through `env:` and read it as a variable at runtime instead.
+      - run: npm run build --workspace="projects/$CHANGED_DIR"
         working-directory: frontend
+        env:
+          CHANGED_DIR: ${{ matrix.value }}
 
       - name: Publish
         run: |
-          PUBLISH_PATH=$(node -e "const p=require('path'); const d=require('./projects/${{ matrix.value }}/ng-package.json').dest; console.log(p.normalize(p.join('projects/${{ matrix.value }}', d)))")
+          PUBLISH_PATH=$(node -e "
+            const p = require('path');
+            const dir = 'projects/' + process.env.CHANGED_DIR;
+            const d = require('./' + dir + '/ng-package.json').dest;
+            console.log(p.normalize(p.join(dir, d)));
+          ")
           npm publish "$PUBLISH_PATH" --access public
         working-directory: frontend
         env:
+          CHANGED_DIR: ${{ matrix.value }}
           NODE_AUTH_TOKEN: ${{ secrets.NPMJS_SECRET }}

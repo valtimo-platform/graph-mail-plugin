@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  id="Definitions_GraphMailTest"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  exporter="Camunda Modeler"
+                  exporterVersion="5.39.0">
+    <bpmn:collaboration id="Collaboration_GraphMailTest">
+        <bpmn:participant id="graph-mail-test-participant" name="Graph Mail Test"
+                          processRef="graph-mail-test-process"/>
+    </bpmn:collaboration>
+    <bpmn:process id="graph-mail-test-process" name="Graph Mail Test" isExecutable="true">
+
+        <bpmn:startEvent id="start-event" name="Test gestart">
+            <bpmn:outgoing>flow-to-store-body</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <!-- De send-email actie neemt een resource-id, geen HTML. Deze taak vult de tijdelijke
+             opslag en zet bodyContentId klaar. Zonder deze stap faalt de verzending met
+             "Body content '...' not found in temporary storage". -->
+        <bpmn:serviceTask id="store-body" name="Body naar tijdelijke opslag"
+                          camunda:expression="${mailTest.storeBody(execution)}">
+            <bpmn:incoming>flow-to-store-body</bpmn:incoming>
+            <bpmn:incoming>flow-loop-back</bpmn:incoming>
+            <bpmn:outgoing>flow-to-store-attachment</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <!-- Genereert een bijlage van attachmentKb kilobytes, of geen bijlage bij 0.
+             Onder 2048 blijft de plugin inline; daarboven gaat hij via concept + upload-sessie
+             en is Mail.ReadWrite vereist. -->
+        <bpmn:serviceTask id="store-attachment" name="Bijlage genereren"
+                          camunda:expression="${mailTest.storeAttachment(execution)}">
+            <bpmn:incoming>flow-to-store-attachment</bpmn:incoming>
+            <bpmn:outgoing>flow-to-send-email</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <!-- Gekoppeld aan de plugin via een process-link, niet via een expression.
+             asyncBefore geeft de job-executor een eigen transactie per verzending;
+             failedJobRetryTimeCycle blijft ruim onder de 30 minuten die de
+             duplicaatbescherming onthoudt. -->
+        <bpmn:serviceTask id="send-email" name="Mail versturen via Graph" camunda:asyncBefore="true">
+            <bpmn:extensionElements>
+                <camunda:failedJobRetryTimeCycle>R5/PT2M</camunda:failedJobRetryTimeCycle>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow-to-send-email</bpmn:incoming>
+            <bpmn:outgoing>flow-to-gateway</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <!-- T8: loopt terug naar dezelfde send-email taak. Bewijst dat de duplicaatbescherming
+             een nieuwe iteratie niet aanziet voor een retry. -->
+        <bpmn:exclusiveGateway id="more-iterations" name="Nog een mail?">
+            <bpmn:incoming>flow-to-gateway</bpmn:incoming>
+            <bpmn:outgoing>flow-loop-back</bpmn:outgoing>
+            <bpmn:outgoing>flow-to-end</bpmn:outgoing>
+        </bpmn:exclusiveGateway>
+
+        <bpmn:endEvent id="end-event" name="Test afgerond">
+            <bpmn:extensionElements>
+                <camunda:executionListener event="start"
+                    expression="${valueResolverDelegateService.handleValue(execution, 'doc:/verzondenAantal', execution.getVariable('mailPass'))}"/>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow-to-end</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="flow-to-store-body" sourceRef="start-event" targetRef="store-body"/>
+        <bpmn:sequenceFlow id="flow-to-store-attachment" sourceRef="store-body" targetRef="store-attachment"/>
+        <bpmn:sequenceFlow id="flow-to-send-email" sourceRef="store-attachment" targetRef="send-email"/>
+        <bpmn:sequenceFlow id="flow-to-gateway" sourceRef="send-email" targetRef="more-iterations"/>
+        <bpmn:sequenceFlow id="flow-loop-back" name="ja" sourceRef="more-iterations" targetRef="store-body">
+            <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"
+                                      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${mailPass &lt; herhalingen}</bpmn:conditionExpression>
+        </bpmn:sequenceFlow>
+        <bpmn:sequenceFlow id="flow-to-end" name="nee" sourceRef="more-iterations" targetRef="end-event">
+            <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"
+                                      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${mailPass &gt;= herhalingen}</bpmn:conditionExpression>
+        </bpmn:sequenceFlow>
+    </bpmn:process>
+
+    <bpmndi:BPMNDiagram id="BPMNDiagram_GraphMailTest">
+        <bpmndi:BPMNPlane id="BPMNPlane_GraphMailTest" bpmnElement="Collaboration_GraphMailTest">
+            <bpmndi:BPMNShape id="participant_di" bpmnElement="graph-mail-test-participant" isHorizontal="true">
+                <dc:Bounds x="160" y="80" width="900" height="280"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="start_di" bpmnElement="start-event">
+                <dc:Bounds x="212" y="182" width="36" height="36"/>
+                <bpmndi:BPMNLabel><dc:Bounds x="200" y="225" width="62" height="14"/></bpmndi:BPMNLabel>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="store_body_di" bpmnElement="store-body">
+                <dc:Bounds x="300" y="160" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="store_attachment_di" bpmnElement="store-attachment">
+                <dc:Bounds x="450" y="160" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="send_email_di" bpmnElement="send-email">
+                <dc:Bounds x="600" y="160" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="gateway_di" bpmnElement="more-iterations" isMarkerVisible="true">
+                <dc:Bounds x="755" y="175" width="50" height="50"/>
+                <bpmndi:BPMNLabel><dc:Bounds x="748" y="145" width="65" height="14"/></bpmndi:BPMNLabel>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="end_di" bpmnElement="end-event">
+                <dc:Bounds x="892" y="182" width="36" height="36"/>
+                <bpmndi:BPMNLabel><dc:Bounds x="878" y="225" width="68" height="14"/></bpmndi:BPMNLabel>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNEdge id="flow_to_store_body_di" bpmnElement="flow-to-store-body">
+                <di:waypoint x="248" y="200"/><di:waypoint x="300" y="200"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="flow_to_store_attachment_di" bpmnElement="flow-to-store-attachment">
+                <di:waypoint x="400" y="200"/><di:waypoint x="450" y="200"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="flow_to_send_email_di" bpmnElement="flow-to-send-email">
+                <di:waypoint x="550" y="200"/><di:waypoint x="600" y="200"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="flow_to_gateway_di" bpmnElement="flow-to-gateway">
+                <di:waypoint x="700" y="200"/><di:waypoint x="755" y="200"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="flow_loop_back_di" bpmnElement="flow-loop-back">
+                <di:waypoint x="780" y="175"/><di:waypoint x="780" y="120"/>
+                <di:waypoint x="350" y="120"/><di:waypoint x="350" y="160"/>
+                <bpmndi:BPMNLabel><dc:Bounds x="558" y="102" width="14" height="14"/></bpmndi:BPMNLabel>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="flow_to_end_di" bpmnElement="flow-to-end">
+                <di:waypoint x="805" y="200"/><di:waypoint x="892" y="200"/>
+                <bpmndi:BPMNLabel><dc:Bounds x="840" y="182" width="18" height="14"/></bpmndi:BPMNLabel>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+</bpmn:definitions>

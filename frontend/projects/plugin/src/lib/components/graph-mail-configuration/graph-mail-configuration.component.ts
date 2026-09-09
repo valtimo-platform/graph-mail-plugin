@@ -4,6 +4,7 @@ import {FormsModule} from '@angular/forms';
 import {HttpClient} from '@angular/common/http';
 import {PluginConfigurationComponent, PluginTranslatePipeModule} from '@valtimo/plugin';
 import {FormModule, InputModule} from '@valtimo/components';
+import {ConfigService} from '@valtimo/shared';
 import {BehaviorSubject, combineLatest, Observable, of, Subscription, take} from 'rxjs';
 import {catchError, filter, map, switchMap} from 'rxjs/operators';
 import {GraphMailPluginConfig} from '../../models';
@@ -40,6 +41,11 @@ export class GraphMailPluginConfigurationComponent
   // UUID van de opgeslagen pluginconfiguratie. Null voor nieuwe (nog niet opgeslagen) configuraties.
   savedConfigurationId: string | null = null;
 
+  // True when multiple configurations for this plugin exist and none can be uniquely
+  // matched by title — sending a test email would silently use the wrong configuration's
+  // credentials, so the test section is blocked with an explicit message instead.
+  configurationAmbiguous = false;
+
   // clientSecret lives outside v-form so we can use a native <input type="password">.
   // The v-input component does not reliably mask password fields.
   clientSecretValue = '';
@@ -53,19 +59,42 @@ export class GraphMailPluginConfigurationComponent
   // True when the form has enough data to show the test section.
   testSectionVisible = false;
 
+  // The allowlist as it was when the configuration was loaded, so a change can be detected.
+  // Null for new configurations (nothing stored yet).
+  private originalAllowedSenders: string | null = null;
+
+  // True when the allowlist has been changed on an existing configuration and the secret has not
+  // been re-entered. Drives the message next to the secret field.
+  secretRequiredForAllowlistChange = false;
+
   // Inline validation flags
   tenantIdInvalid = false;
   clientIdInvalid = false;
+  allowedSendersInvalid = false;
 
   // Aligned with the backend EMAIL_REGEX in GraphMailValidation.kt — keep in sync.
   private static readonly EMAIL_RE =
     /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/;
 
+  // Allowlist entry: a full email address or a domain entry such as '@gemeente.nl'.
+  private static readonly DOMAIN_ENTRY_RE =
+    /^@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/;
+
   // Azure Tenant IDs and Client IDs are always GUIDs.
   private static readonly UUID_RE =
     /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-  constructor(private readonly http: HttpClient) {}
+  // Every first-party Valtimo plugin configuration component builds API URLs from
+  // ConfigService.config.valtimoApi.endpointUri rather than hardcoding '/api/...' — this
+  // keeps the plugin working when frontend and backend are served from different origins.
+  constructor(
+    private readonly http: HttpClient,
+    private readonly configService: ConfigService,
+  ) {}
+
+  private get apiUrl(): string {
+    return this.configService.config.valtimoApi.endpointUri;
+  }
 
   ngOnInit(): void {
     this.saveSubscription = this.save$?.subscribe(() => {
@@ -89,6 +118,7 @@ export class GraphMailPluginConfigurationComponent
         .pipe(filter(config => !!config), take(1))
         .subscribe((config: any) => {
           this.testSenderMailbox = config?.testSenderMailbox ?? '';
+          this.originalAllowedSenders = config?.allowedSenders ?? null;
         });
 
       // Resolve the saved configuration UUID for the test-send endpoint.
@@ -99,13 +129,13 @@ export class GraphMailPluginConfigurationComponent
           switchMap((config: any) => {
             // 1. Some Valtimo versions include the id directly in the prefill object.
             if (config?.id) {
-              return of(config.id as string);
+              return of({id: config.id as string, ambiguous: false});
             }
 
             // 2. Fallback: GET /api/v1/plugin/configuration and match by pluginId / title.
             // URL-based UUID extraction was removed — it is too fragile when the URL contains
             // multiple UUIDs (case IDs, document IDs, etc.) and could select the wrong config.
-            return this.http.get<any[]>('/api/v1/plugin/configuration').pipe(
+            return this.http.get<any[]>(`${this.apiUrl}v1/plugin/configuration`).pipe(
               map(configs => {
                 const allForPlugin = configs.filter(c =>
                   c.pluginDefinitionKey === this.pluginId ||
@@ -114,22 +144,33 @@ export class GraphMailPluginConfigurationComponent
                 );
 
                 if (allForPlugin.length === 1) {
-                  return (allForPlugin[0].id as string) ?? null;
+                  return {id: (allForPlugin[0].id as string) ?? null, ambiguous: false};
                 }
 
                 const byTitle = allForPlugin.find(c =>
                   c.title === (config as any).configurationTitle ||
                   c.configurationTitle === (config as any).configurationTitle
                 );
-                return (byTitle?.id ?? allForPlugin[0]?.id ?? null) as string | null;
+                if (byTitle?.id) {
+                  return {id: byTitle.id as string, ambiguous: false};
+                }
+
+                // Multiple configurations exist and none matches by title — guessing here
+                // (e.g. picking allForPlugin[0]) risks sending a test email using a *different*
+                // configuration's credentials than the one the admin is looking at. Block
+                // instead of guessing; see graph-mail-configuration.component.spec.ts.
+                return {id: null, ambiguous: allForPlugin.length > 1};
               }),
-              catchError(() => of(null))
+              catchError(() => of({id: null, ambiguous: false}))
             );
           })
         )
-        .subscribe(id => {
+        .subscribe(({id, ambiguous}) => {
           this.savedConfigurationId = id;
-          // Validity depends on this id, which lands after the prefill — so recompute.
+          this.configurationAmbiguous = ambiguous;
+          // Both of the above land after the prefill has already been validated, and Save is gated
+          // on that validity — so without recomputing here, Save stays disabled on an existing
+          // configuration until the admin touches a field.
           const formValue = this.formValue$.getValue();
           if (formValue) this.updateValidAndVisibility(formValue);
         });
@@ -153,8 +194,53 @@ export class GraphMailPluginConfigurationComponent
       formValue.clientId &&
       !GraphMailPluginConfigurationComponent.UUID_RE.test(formValue.clientId)
     );
+    this.allowedSendersInvalid = !!(
+      formValue.allowedSenders &&
+      !GraphMailPluginConfigurationComponent.isValidAllowlist(formValue.allowedSenders)
+    );
 
     this.updateValidAndVisibility(formValue);
+  }
+
+  // Every comma-separated entry must be a full email address or an '@domain' entry.
+  private static isValidAllowlist(value: string): boolean {
+    const entries = value.split(',').map(entry => entry.trim()).filter(entry => !!entry);
+    return (
+      entries.length > 0 &&
+      entries.every(
+        entry =>
+          GraphMailPluginConfigurationComponent.EMAIL_RE.test(entry) ||
+          GraphMailPluginConfigurationComponent.DOMAIN_ENTRY_RE.test(entry)
+      )
+    );
+  }
+
+  // Compared as a set of trimmed, lowercased entries — the same normalisation the backend applies
+  // in AllowedSendersChangeGuard, so the two cannot disagree about what counts as "changed".
+  // Reordering or respacing the same addresses is not a change.
+  private allowlistChanged(current: string | undefined): boolean {
+    // Mirrors parseStringListParam in GraphMailPlugin.kt, which the backend guard uses: the
+    // bracketed JSON-array form is accepted there, so `["a@x.nl"]` and `a@x.nl` are the same list.
+    // Deduplicated and sorted because the guard compares as a Set. Any divergence here means the
+    // form and the backend disagree about whether the list changed.
+    const normalise = (value: string | null | undefined): string => {
+      const raw = (value ?? '').trim();
+      const entries = raw.startsWith('[')
+        ? raw
+            .replace(/^\[/, '')
+            .replace(/]$/, '')
+            .split(',')
+            .map(entry => entry.trim().replace(/^["']|["']$/g, '').trim())
+        : raw.split(',').map(entry => entry.trim());
+
+      return Array.from(
+        new Set(entries.map(entry => entry.toLowerCase()).filter(entry => !!entry)),
+      )
+        .sort()
+        .join(',');
+    };
+
+    return normalise(current) !== normalise(this.originalAllowedSenders);
   }
 
   // Called when the password input changes so validity re-evaluates without a v-form event.
@@ -167,7 +253,19 @@ export class GraphMailPluginConfigurationComponent
     // When editing an existing configuration the backend never returns the secret,
     // so an empty field means "unchanged" — the form is still valid without it.
     const isNewConfiguration = !this.savedConfigurationId;
-    const secretValid = isNewConfiguration ? !!this.clientSecretValue : true;
+
+    // ...except when the sender allowlist is being changed. That list bounds which mailboxes this
+    // plugin may send as, so widening it is a privilege escalation and should be provable by
+    // whoever holds the credential — not merely by whoever has the admin screen open. The backend
+    // enforces the same rule (AllowedSendersChangeGuard); this is the immediate feedback.
+    this.secretRequiredForAllowlistChange =
+      !isNewConfiguration &&
+      this.allowlistChanged(formValue.allowedSenders) &&
+      !this.clientSecretValue;
+
+    const secretValid = isNewConfiguration
+      ? !!this.clientSecretValue
+      : !this.secretRequiredForAllowlistChange;
 
     const valid = !!(
       formValue.configurationTitle &&
@@ -175,6 +273,8 @@ export class GraphMailPluginConfigurationComponent
       !this.tenantIdInvalid &&
       formValue.clientId &&
       !this.clientIdInvalid &&
+      formValue.allowedSenders &&
+      !this.allowedSendersInvalid &&
       secretValid
     );
     this.valid$.next(valid);
@@ -195,6 +295,7 @@ export class GraphMailPluginConfigurationComponent
   get canSendTest(): boolean {
     return (
       !!this.savedConfigurationId &&
+      !this.configurationAmbiguous &&
       this.testSectionVisible &&
       GraphMailPluginConfigurationComponent.EMAIL_RE.test(this.testSenderMailbox) &&
       GraphMailPluginConfigurationComponent.EMAIL_RE.test(this.testRecipient) &&
@@ -212,14 +313,14 @@ export class GraphMailPluginConfigurationComponent
 
   sendTestEmail(): void {
     const form = this.formValue$.getValue();
-    if (!form || !this.canSendTest || !this.savedConfigurationId) return;
+    if (!form || !this.canSendTest || !this.savedConfigurationId || this.configurationAmbiguous) return;
 
     this.testLoading = true;
     this.testStatus = null;
 
     this.testEmailSubscription?.unsubscribe();
     this.testEmailSubscription = this.http
-      .post<TestSendStatus>('/api/v1/plugin/entra/test-send', {
+      .post<TestSendStatus>(`${this.apiUrl}v1/plugin/entra/test-send`, {
         pluginConfigurationId: this.savedConfigurationId,
         recipient: this.testRecipient,
         senderMailbox: this.testSenderMailbox,

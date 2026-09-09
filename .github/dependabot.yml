@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Backend: Gradle dependencies (this is how the outdated jsoup version — CVE-2026-71497 —
+  # went unnoticed until a manual review; automated scanning closes that gap going forward).
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Frontend: npm dependencies.
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+
+  # GitHub Actions: this is how the unpinned tj-actions/changed-files@v45 — compromised in
+  # March 2025 (CVE-2025-30066) — went unnoticed. Dependabot also proposes SHA updates for
+  # actions already pinned by commit SHA, keeping the pin current instead of stale forever.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

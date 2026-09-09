@@ -1,0 +1,12 @@
+[
+    {
+        "processDefinitionKey": "graph-mail-test-process",
+        "canInitializeDocument": true,
+        "startableByUser": true
+    },
+    {
+        "processDefinitionKey": "graph-mail-retry-test-process",
+        "canInitializeDocument": true,
+        "startableByUser": true
+    }
+]

@@ -61,6 +61,7 @@ Ga naar **Admin → Plugins**, kies **Microsoft Graph Mail** en maak een nieuwe 
 | **Tenant ID** | De Directory (tenant) ID van je beheerder. Moet een UUID zijn — het scherm geeft direct een melding als het formaat niet klopt. |
 | **Client ID** | De Application (client) ID. Ook een UUID, met dezelfde controle. |
 | **Client Secret** | Het secret van de beheerder. Wordt gemaskeerd weergegeven en versleuteld opgeslagen; je kunt hem na opslaan niet meer uitlezen. |
+| **Toegestane afzenders** | Verplicht. De mailboxen waaruit deze configuratie mag versturen. Zie *Toegestane afzenders* hieronder. |
 | **Afzender testmail (e-mailadres)** | Optioneel. Het afzenderadres dat standaard wordt voorgesteld bij de testmail hieronder. Heeft geen invloed op het versturen vanuit processen. |
 
 Je kunt meerdere configuraties naast elkaar aanmaken, bijvoorbeeld één per afdeling of per
@@ -69,6 +70,32 @@ tenant. Bij het koppelen aan een processtap kies je welke je gebruikt.
 **Een bestaande configuratie wijzigen:** laat *Client Secret* leeg om het huidige secret te
 behouden. Het veld toont dan de hint *(ongewijzigd laten als leeg)*. Vul je het wél in, dan
 wordt het secret overschreven.
+
+Op één punt geldt dat niet: **wijzig je de lijst met toegestane afzenders, dan moet je het Client
+Secret opnieuw invullen.** Zie hieronder waarom.
+
+### Toegestane afzenders
+
+De plugin verstuurt uitsluitend namens de mailboxen die je hier opgeeft. Staat een afzender er niet
+tussen, dan wordt de verzending geweigerd voordat er contact met Microsoft is — de processtap stopt
+met een foutmelding en er gaat geen mail uit. Dat geldt ook voor de testmail.
+
+Je vult volledige adressen in (`noreply@gemeente.nl`), hele domeinen (`@gemeente.nl`), of een
+combinatie daarvan, gescheiden door komma's. Hoofdletters maken niet uit. Een domein-entry dekt geen
+subdomeinen: `@gemeente.nl` staat `post@gemeente.nl` toe, maar niet `post@mail.gemeente.nl`.
+
+> **Bij het bijwerken van een bestaande installatie:** configuraties van vóór deze versie hebben nog
+> geen lijst. Die versturen **niets** totdat je de lijst eenmalig invult en opslaat. Doe dat vóór of
+> direct na de upgrade.
+
+**Waarom het Client Secret erbij moet.** De machtiging die je beheerder in Azure heeft gegeven geldt
+voor de hele tenant: technisch kan de plugin namens elke mailbox mailen. Deze lijst is de grens die
+dat inperkt. Een adres toevoegen betekent dus dat er vanaf dat moment namens die mailbox gemaild kan
+worden — en dat hoort niet te kunnen met alleen toegang tot dit scherm. Wie de lijst verruimt, moet
+ook het secret bezitten.
+
+Laat je de lijst ongemoeid, dan verandert er niets en mag het secretveld leeg blijven. De volgorde
+of de spatiëring aanpassen telt niet als wijziging; een adres verwijderen wél.
 
 ## Stap 2 — Testmail versturen
 
@@ -164,15 +191,20 @@ De HTML wordt vóór verzending automatisch opgeschoond, zodat een template geen
 privacygevoelige inhoud kan meesturen.
 
 **Blijft behouden:** koppen, vet en cursief, lijsten, tabellen, links, afbeeldingen met een
-`http(s)`-adres, en opmaak via `style`-attributen op elementen.
+`https`-adres of als bijlage ingesloten, en opmaak via `style`-attributen op elementen.
 
 **Wordt verwijderd:** scripts, iframes, losse `<style>`-blokken bovenaan het document,
-afbeeldingen die als `data:`-URI zijn ingebed, en klik-acties op elementen.
+afbeeldingen die als `data:`-URI zijn ingebed, klik-acties op elementen, en afbeeldingen met een
+`http`-adres (zonder de **s**).
 
-Twee gevolgen voor wie templates maakt:
+Drie gevolgen voor wie templates maakt:
 
 - Zet opmaak **per element** (`style="…"`), niet in een `<style>`-blok — dat laatste sneuvelt en
   je mail komt onopgemaakt aan.
+- **Een logo blijft gewoon werken**, zolang het op `https://` staat of als bijlage is ingesloten.
+  Staat het logo in een bestaand sjabloon nog op `http://`, dan komt de mail aan zonder die
+  afbeelding; zet dat adres om naar `https://`. Reden: een afbeelding wordt opgehaald op het moment
+  dat de ontvanger de mail opent, en bij `http` gebeurt dat over een onbeveiligde verbinding.
 - Blijft er na het opschonen niets over, dan slaagt de verzending niet en stopt de processtap
   met een foutmelding. Controleer dan het gegenereerde HTML-bestand.
 
@@ -192,11 +224,10 @@ Twee gevolgen voor wie templates maakt:
 Microsoft 365. Wil je dat de mail van "Gemeente — Vergunningen" komt, laat je beheerder dan de
 naam van de mailbox aanpassen in het Microsoft 365 Admin Center.
 
-**Grote bijlagen:** je hoeft hier niets voor in te stellen. Passen alle bijlagen samen in één
-bericht — ruwweg tot 3 MB in totaal — dan gaan ze in één keer mee. Daarboven schakelt de plugin
-automatisch over op de route voor grote bestanden van Microsoft, waarbij elke bijlage
-afzonderlijk wordt toegevoegd. Dan is wel `Mail.ReadWrite` vereist. Deze route duurt merkbaar
-langer.
+**Grote bijlagen:** je hoeft hier niets voor in te stellen. Passen de mailtekst en alle bijlagen
+samen in één bericht — ruwweg tot 3 MB aan bijlagen — dan gaan ze in één keer mee. Daarboven maakt
+de plugin eerst een concept aan en hangt elke bijlage daar afzonderlijk aan, waarna het concept
+wordt verzonden. Dan is wel `Mail.ReadWrite` vereist, en het duurt merkbaar langer.
 
 **Bezorging:** de plugin krijgt van Microsoft alleen terug dat de mail is *aangenomen*, niet dat
 hij is *bezorgd*. Een mail die daarna alsnog bounct, ziet Valtimo niet. Controleer bezorging in
@@ -226,16 +257,22 @@ Reply-To-adressen tellen niet mee in het ontvangerstotaal — die krijgen de mai
 
 ## Goed om te weten
 
-**Een mail kan in uitzonderlijke gevallen dubbel aankomen.** Als de processtap door een
-technische storing halverwege opnieuw wordt uitgevoerd, kan de mail een tweede keer worden
-verstuurd. Er zit geen blokkade op. Bij processen waar dat echt niet mag, laat je de
-ontvangende partij op dubbele berichten controleren — bijvoorbeeld via een kenmerk in het
-onderwerp.
+**Dubbele mail wordt tegengehouden, maar niet onder alle omstandigheden.** Wordt de processtap door
+een technische storing opnieuw uitgevoerd nadat de mail al was aangenomen, dan herkent de plugin dat
+en verstuurt hij niet nog een keer. Je hoeft daar in het proces niets voor in te richten.
 
-**Versturen kan even duren.** Reageert Microsoft niet direct of begrenst het tijdelijk, dan
-probeert de plugin het automatisch opnieuw. Een verzending duurt daardoor maximaal 30 seconden,
-of 2 minuten bij grote bijlagen. Bij drukte kan dit andere processen in Valtimo vertragen — een
-punt om met je beheerder af te stemmen.
+Die bescherming leeft in het geheugen van de server en houdt een verzending een half uur vast. Ze
+werkt daarom níet wanneer de applicatie op meerdere servers draait, wanneer de herhaling pas na een
+half uur komt, of wanneer de applicatie tussendoor is herstart. Gaat het om processen waar een
+dubbele mail echt niet kan, stem dat dan af met je beheerder — en laat de ontvangende partij
+daarnaast op dubbele berichten controleren, bijvoorbeeld via een kenmerk in het onderwerp.
+
+**Versturen kan even duren.** Een verzending duurt maximaal 30 seconden, of 2 minuten bij grote
+bijlagen. Begrenst Microsoft het verkeer tijdelijk, dan wacht de plugin hooguit twee seconden en
+geeft de verzending daarna terug aan Valtimo, die het later opnieuw inplant. Zo houdt één trage
+mailserver de rest van de procesverwerking niet op. Vraag je beheerder wel om op de mailstap een
+herhaalschema in te stellen; zonder dat valt Valtimo terug op zijn standaard, die voor deze situatie
+meestal te kort is.
 
 **Log van verzendingen.** Elke verzending wordt vastgelegd, met e-mailadressen gedeeltelijk
 afgeschermd (`p***@patje.nl`) om onnodige verwerking van persoonsgegevens te voorkomen. Vraag je

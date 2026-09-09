@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  id="Definitions_GraphMailRetryTest"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  exporter="Camunda Modeler"
+                  exporterVersion="5.39.0">
+    <bpmn:collaboration id="Collaboration_GraphMailRetryTest">
+        <bpmn:participant id="graph-mail-retry-test-participant" name="Graph Mail Retry Test"
+                          processRef="graph-mail-retry-test-process"/>
+    </bpmn:collaboration>
+    <bpmn:process id="graph-mail-retry-test-process" name="Graph Mail Retry Test" isExecutable="true">
+
+        <bpmn:startEvent id="start-event" name="Retrytest gestart">
+            <bpmn:outgoing>flow-to-store-body</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <bpmn:serviceTask id="store-body" name="Body naar tijdelijke opslag"
+                          camunda:expression="${mailTest.storeBody(execution)}">
+            <bpmn:incoming>flow-to-store-body</bpmn:incoming>
+            <bpmn:outgoing>flow-to-store-attachment</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <bpmn:serviceTask id="store-attachment" name="Bijlage genereren"
+                          camunda:expression="${mailTest.storeAttachment(execution)}">
+            <bpmn:incoming>flow-to-store-attachment</bpmn:incoming>
+            <bpmn:outgoing>flow-to-send-email</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <!-- asyncBefore zet hier de transactiegrens: de job-executor voert deze taak en alles wat
+             er zonder eigen grens op volgt in één transactie uit. Korte retry-cyclus zodat de
+             tweede poging binnen seconden komt in plaats van minuten. -->
+        <bpmn:serviceTask id="send-email" name="Mail versturen via Graph" camunda:asyncBefore="true">
+            <bpmn:extensionElements>
+                <camunda:failedJobRetryTimeCycle>R3/PT10S</camunda:failedJobRetryTimeCycle>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow-to-send-email</bpmn:incoming>
+            <bpmn:outgoing>flow-to-fail-once</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <!-- Bewust GEEN asyncBefore: deze taak deelt de transactie met send-email. Gooit hij, dan
+             rolt de verzending administratief terug terwijl Graph de mail al onomkeerbaar heeft
+             geaccepteerd — precies het scenario waarvoor de duplicaatbescherming bestaat.
+             De tweede poging slaagt, zodat het proces afrondt. -->
+        <bpmn:serviceTask id="fail-once" name="Forceer rollback (eenmalig)"
+                          camunda:expression="${mailTest.failOnce(execution)}">
+            <bpmn:incoming>flow-to-fail-once</bpmn:incoming>
+            <bpmn:outgoing>flow-to-end</bpmn:outgoing>
+        </bpmn:serviceTask>
+
+        <bpmn:endEvent id="end-event" name="Retrytest afgerond">
+            <bpmn:incoming>flow-to-end</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="flow-to-store-body" sourceRef="start-event" targetRef="store-body"/>
+        <bpmn:sequenceFlow id="flow-to-store-attachment" sourceRef="store-body" targetRef="store-attachment"/>
+        <bpmn:sequenceFlow id="flow-to-send-email" sourceRef="store-attachment" targetRef="send-email"/>
+        <bpmn:sequenceFlow id="flow-to-fail-once" sourceRef="send-email" targetRef="fail-once"/>
+        <bpmn:sequenceFlow id="flow-to-end" sourceRef="fail-once" targetRef="end-event"/>
+    </bpmn:process>
+
+    <bpmndi:BPMNDiagram id="BPMNDiagram_GraphMailRetryTest">
+        <bpmndi:BPMNPlane id="BPMNPlane_GraphMailRetryTest" bpmnElement="Collaboration_GraphMailRetryTest">
+            <bpmndi:BPMNShape id="participant_di" bpmnElement="graph-mail-retry-test-participant" isHorizontal="true">
+                <dc:Bounds x="160" y="100" width="900" height="200"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="start_di" bpmnElement="start-event">
+                <dc:Bounds x="212" y="182" width="36" height="36"/>
+                <bpmndi:BPMNLabel><dc:Bounds x="192" y="225" width="80" height="14"/></bpmndi:BPMNLabel>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="store_body_di" bpmnElement="store-body">
+                <dc:Bounds x="300" y="160" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="store_attachment_di" bpmnElement="store-attachment">
+                <dc:Bounds x="450" y="160" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="send_email_di" bpmnElement="send-email">
+                <dc:Bounds x="600" y="160" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="fail_once_di" bpmnElement="fail-once">
+                <dc:Bounds x="750" y="160" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="end_di" bpmnElement="end-event">
+                <dc:Bounds x="912" y="182" width="36" height="36"/>
+                <bpmndi:BPMNLabel><dc:Bounds x="890" y="225" width="86" height="14"/></bpmndi:BPMNLabel>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNEdge id="flow_to_store_body_di" bpmnElement="flow-to-store-body">
+                <di:waypoint x="248" y="200"/><di:waypoint x="300" y="200"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="flow_to_store_attachment_di" bpmnElement="flow-to-store-attachment">
+                <di:waypoint x="400" y="200"/><di:waypoint x="450" y="200"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="flow_to_send_email_di" bpmnElement="flow-to-send-email">
+                <di:waypoint x="550" y="200"/><di:waypoint x="600" y="200"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="flow_to_fail_once_di" bpmnElement="flow-to-fail-once">
+                <di:waypoint x="700" y="200"/><di:waypoint x="750" y="200"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="flow_to_end_di" bpmnElement="flow-to-end">
+                <di:waypoint x="850" y="200"/><di:waypoint x="912" y="200"/>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+</bpmn:definitions>

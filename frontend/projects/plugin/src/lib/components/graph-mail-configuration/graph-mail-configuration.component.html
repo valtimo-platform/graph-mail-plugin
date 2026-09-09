@@ -43,6 +43,22 @@
       {{ 'clientIdInvalidFormat' | pluginTranslate: pluginId | async }}
     </div>
 
+    <v-input
+      name="allowedSenders"
+      [title]="'allowedSenders' | pluginTranslate: pluginId | async"
+      [tooltip]="'allowedSendersTooltip' | pluginTranslate: pluginId | async"
+      [margin]="true"
+      [defaultValue]="obs.prefill?.allowedSenders"
+      [disabled]="obs.disabled"
+      [required]="true"
+    ></v-input>
+    <div
+      *ngIf="allowedSendersInvalid"
+      style="margin: -10px 0 10px; font-size: 12px; color: #da1e28"
+    >
+      {{ 'allowedSendersInvalidFormat' | pluginTranslate: pluginId | async }}
+    </div>
+
   </v-form>
 
   <!-- clientSecret outside v-form: native password input guarantees masking -->
@@ -61,6 +77,12 @@
              background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box;
              outline: none; font-family: inherit"
     />
+    <div
+      *ngIf="secretRequiredForAllowlistChange"
+      style="margin: 8px 0 0; font-size: 12px; color: #da1e28"
+    >
+      {{ 'allowedSendersChangeRequiresSecret' | pluginTranslate: pluginId | async }}
+    </div>
   </div>
 
   <!-- ── Testmail (zichtbaar zodra Tenant ID + Client ID + Client Secret zijn ingevuld) ── -->
@@ -75,10 +97,18 @@
 
     <!-- Niet-opgeslagen configuratie: testmail werkt alleen na opslaan -->
     <div
-      *ngIf="!savedConfigurationId"
+      *ngIf="!savedConfigurationId && !configurationAmbiguous"
       style="margin-bottom: 14px; padding: 10px 14px; background: #edf5ff; border: 1px solid #0f62fe; border-radius: 4px; font-size: 13px; color: #002d9c"
     >
       &#x2139; {{ 'testMailSaveFirst' | pluginTranslate: pluginId | async }}
+    </div>
+
+    <!-- Meerdere configuraties met dezelfde titel: niet gokken welke bedoeld is -->
+    <div
+      *ngIf="configurationAmbiguous"
+      style="margin-bottom: 14px; padding: 10px 14px; background: #fff1f1; border: 1px solid #da1e28; border-radius: 4px; font-size: 13px; color: #a2191f"
+    >
+      &#x26A0; {{ 'testMailConfigAmbiguous' | pluginTranslate: pluginId | async }}
     </div>
 
     <!-- Afzender e-mailadres -->

@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 private const val RATE_LIMIT_INTERVAL_MS = 10_000L // max 1 test-send per 10s per user
+private const val RATE_LIMIT_STORE_MAX_ENTRIES = 1_000
 
 @RestController
 @RequestMapping("/api/v1/plugin/entra")
@@ -36,10 +37,20 @@ class GraphMailTestSendController(
     // CAS-based check — atomically read and update in one step.
     private fun isRateLimited(username: String): Boolean {
         val now = System.currentTimeMillis()
+        evictStaleRateLimitEntriesIfNeeded(now)
         val tracker = rateLimitStore.computeIfAbsent(username) { AtomicLong(0) }
         val prev = tracker.get()
         if (now - prev < RATE_LIMIT_INTERVAL_MS) return true
         return !tracker.compareAndSet(prev, now)
+    }
+
+    // rateLimitStore only grows (one entry per distinct username that has ever called
+    // test-send) and never shrinks on its own. Once it gets large, sweep out entries whose
+    // last request already fell outside the rate-limit window — they're not being rate-limited
+    // by anything anymore — so a long-running instance doesn't leak memory one admin at a time.
+    private fun evictStaleRateLimitEntriesIfNeeded(now: Long) {
+        if (rateLimitStore.size < RATE_LIMIT_STORE_MAX_ENTRIES) return
+        rateLimitStore.entries.removeIf { now - it.value.get() > RATE_LIMIT_INTERVAL_MS }
     }
 
     // Admin-only: this endpoint sends real email using production credentials.
@@ -106,6 +117,34 @@ class GraphMailTestSendController(
             )
         }
 
+        // The sender allowlist applies to test sends too — an admin must not be able to
+        // send as an arbitrary tenant mailbox either. Empty list = deny-all (strict).
+        val allowlist = plugin.allowedSendersList()
+        if (allowlist.isEmpty()) {
+            logger.warn(
+                "Test send rejected — 'allowedSenders' is not configured for plugin configuration {}",
+                configIdStr,
+            )
+            return ResponseEntity.badRequest().body(
+                GraphMailTestSendResponse(
+                    false,
+                    "De pluginconfiguratie heeft geen 'allowedSenders' (afzender-whitelist) — " +
+                        "vul de toegestane afzendermailboxen in en sla de configuratie op",
+                    400,
+                ),
+            )
+        }
+        if (!isSenderAllowed(testSender, allowlist)) {
+            logger.warn("Test send rejected — sender {} not on the allowedSenders allowlist", maskEmail(testSender))
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                GraphMailTestSendResponse(
+                    false,
+                    "Afzender staat niet op de 'allowedSenders' whitelist van deze pluginconfiguratie",
+                    403,
+                ),
+            )
+        }
+
         logger.info(
             "Test send requested — recipient: {}, mailbox: {}",
             maskEmail(request.recipient),
@@ -115,24 +154,26 @@ class GraphMailTestSendController(
         val sendStart = System.currentTimeMillis()
         return try {
             graphMailClient.sendMail(
-                tenantId = plugin.tenantId,
-                clientId = plugin.clientId,
-                clientSecret = plugin.clientSecret,
-                senderMailbox = testSender,
-                toRecipients = listOf(GraphRecipient(GraphEmailAddress(address = request.recipient))),
-                ccRecipients = emptyList(),
-                bccRecipients = emptyList(),
-                replyToRecipients = emptyList(),
-                subject = "Testmail — Microsoft Graph Mail Plugin",
-                bodyHtml = buildTestBody(testSender),
-                attachments = emptyList(),
-                saveToSentItems = false,
+                credentials =
+                    GraphCredentials(
+                        tenantId = plugin.tenantId,
+                        clientId = plugin.clientId,
+                        clientSecret = plugin.clientSecret,
+                    ),
+                mail =
+                    OutboundMail(
+                        senderMailbox = testSender,
+                        toRecipients = listOf(GraphRecipient(GraphEmailAddress(address = request.recipient))),
+                        subject = "Testmail — Microsoft Graph Mail Plugin",
+                        bodyHtml = buildTestMailBody(testSender),
+                        saveToSentItems = false,
+                    ),
             )
             val durationMs = System.currentTimeMillis() - sendStart
             logger.info("Test send successful — recipient: {}", maskEmail(request.recipient))
             eventPublisher.publishEvent(
                 GraphMailEmailSentEvent(
-                    senderMailbox = testSender,
+                    senderMailbox = maskEmail(testSender),
                     recipientCount = 1,
                     ccCount = 0,
                     bccCount = 0,
@@ -150,8 +191,12 @@ class GraphMailTestSendController(
         } catch (ex: GraphMailTokenExpiredException) {
             val message = "Authenticatie mislukt (401) — token geweigerd door Graph API, controleer Client Secret"
             logger.warn("Test send failed — {}", message)
+            // Deliberately NOT an HTTP 401. This is Graph rejecting *our* token, not the admin's
+            // session being invalid — and a 401 on the wire makes the frontend's auth interceptor
+            // log the administrator out over nothing more than a mistyped client secret. The Graph
+            // status stays visible in the response body.
             ResponseEntity
-                .status(HttpStatus.UNAUTHORIZED)
+                .status(HttpStatus.BAD_GATEWAY)
                 .body(GraphMailTestSendResponse(false, message, 401))
         } catch (ex: Exception) {
             val rawStatus =
@@ -162,6 +207,9 @@ class GraphMailTestSendController(
                     else -> 500
                 }
             val statusCode = if (rawStatus in 100..599) rawStatus else 500
+            // Same reasoning as the GraphMailTokenExpiredException branch above: an upstream 401
+            // must not surface as a 401 from this API.
+            val httpStatus = if (statusCode == 401) 502 else statusCode
             val message =
                 when (statusCode) {
                     400 -> "Ongeldige aanvraag (400) — controleer Tenant ID en Client ID"
@@ -169,56 +217,26 @@ class GraphMailTestSendController(
                     403 -> "Toegang geweigerd (403) — controleer of Mail.Send is toegekend in de Azure App Registration"
                     429 -> "Te veel verzoeken (429) — probeer het over een moment opnieuw"
                     503, 502, 504 ->
-                        "Azure / Graph API tijdelijk niet beschikbaar ($statusCode) — probeer het later opnieuw"
-                    else -> "Fout $statusCode: ${ex.message ?: "Onbekende fout"}"
+                        "Azure / Graph API tijdelijk niet beschikbaar ($statusCode) — " +
+                            "probeer het later opnieuw"
+                    // The raw exception message can carry mailbox addresses, internal hostnames or Graph
+                    // request ids. The plugin action path already masks those before they leave the JVM
+                    // (see EMAIL_IN_TEXT_REGEX in GraphMailPlugin); this endpoint has to do the same,
+                    // because its message goes straight into the admin UI.
+                    else -> "Fout $statusCode: ${maskEmailsInText(ex.message) ?: "Onbekende fout"}"
                 }
-            logger.warn("Test send failed — status: {}", statusCode, ex)
+            // Deliberately not passing `ex` itself: its message (and the URIs inside it) can carry
+            // the sender mailbox, and a logged throwable prints that message alongside the stack
+            // trace — undoing the masking applied to the response a few lines above.
+            logger.warn(
+                "Test send failed — status: {}, type: {}, cause: {}",
+                statusCode,
+                ex.javaClass.simpleName,
+                maskEmailsInText(ex.message),
+            )
             ResponseEntity
-                .status(statusCode)
+                .status(httpStatus)
                 .body(GraphMailTestSendResponse(false, message, statusCode))
         }
-    }
-
-    private fun buildTestBody(sender: String): String {
-        val escapedSender =
-            org.springframework.web.util.HtmlUtils
-                .htmlEscape(sender)
-        return """
-            <html>
-            <body style="font-family: Arial, sans-serif; color: #333; padding: 32px; max-width: 600px;">
-              <div style="background: #003d82; padding: 20px 24px; border-radius: 6px 6px 0 0;">
-                <h2 style="color: #fff; margin: 0; font-size: 18px">Testmail — Microsoft Graph Mail Plugin</h2>
-              </div>
-              <div style="border: 1px solid #ddd; border-top: none; padding: 24px; border-radius: 0 0 6px 6px;">
-                <p>Dit is een <strong>testmail</strong> om te valideren dat de e-mailconfiguratie correct werkt.</p>
-                <table style="border-collapse: collapse; width: 100%; margin: 16px 0;">
-                  <tr style="background: #f5f5f5;">
-                    <td style="padding: 8px 12px; font-weight: bold; width: 140px; border: 1px solid #e0e0e0">Naam</td>
-                    <td style="padding: 8px 12px; border: 1px solid #e0e0e0">Pietje van Patje</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 12px; font-weight: bold; border: 1px solid #e0e0e0">E-mailadres</td>
-                    <td style="padding: 8px 12px; border: 1px solid #e0e0e0">pietje@patje.nl</td>
-                  </tr>
-                  <tr style="background: #f5f5f5;">
-                    <td style="padding: 8px 12px; font-weight: bold; border: 1px solid #e0e0e0">Zaaknummer</td>
-                    <td style="padding: 8px 12px; border: 1px solid #e0e0e0">ZAK-2025-00001</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 12px; font-weight: bold; border: 1px solid #e0e0e0">Status</td>
-                    <td style="padding: 8px 12px; border: 1px solid #e0e0e0">In behandeling</td>
-                  </tr>
-                </table>
-                <p style="color: #666; font-size: 13px; margin-top: 24px;">
-                  Als u dit bericht heeft ontvangen, zijn de credentials correct geconfigureerd en werkt
-                  de verbinding met Microsoft Graph API.
-                </p>
-              </div>
-              <p style="font-size: 11px; color: #aaa; margin-top: 16px; text-align: center;">
-                Verzonden via Microsoft Graph API &middot; Graph Mail Plugin configuratietest &middot; $escapedSender
-              </p>
-            </body>
-            </html>
-            """.trimIndent()
     }
 }

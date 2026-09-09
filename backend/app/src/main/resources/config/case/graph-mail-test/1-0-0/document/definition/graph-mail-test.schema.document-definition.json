@@ -1,0 +1,18 @@
+{
+    "$id": "graph-mail-test.schema",
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Graph Mail Test",
+    "type": "object",
+    "properties": {
+        "senderMailbox": { "type": "string", "description": "Afzender van de testmail" },
+        "recipients": { "type": "string", "description": "Ontvangers" },
+        "cc": { "type": "string", "description": "CC-ontvangers" },
+        "bcc": { "type": "string", "description": "BCC-ontvangers" },
+        "replyTo": { "type": "string", "description": "Reply-To adressen" },
+        "subject": { "type": "string", "description": "Onderwerp" },
+        "bodyText": { "type": "string", "description": "Berichttekst" },
+        "attachmentKb": { "type": "number", "description": "Grootte van de gegenereerde bijlage in KB" },
+        "herhalingen": { "type": "number", "description": "Aantal verzendingen binnen deze procesinstantie" },
+        "verzondenAantal": { "type": "number", "description": "Aantal daadwerkelijk uitgevoerde verzendingen" }
+    }
+}

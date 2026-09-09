@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.argThat
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
@@ -32,6 +33,8 @@ import org.mockito.kotlin.whenever
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.http.HttpStatus
 import org.springframework.security.core.Authentication
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 private const val VALID_CONFIG_ID = "11111111-1111-1111-1111-111111111111"
 private const val VALID_RECIPIENT = "recipient@test.nl"
@@ -48,11 +51,16 @@ class GraphMailTestSendControllerTest {
         }
     private lateinit var controller: GraphMailTestSendController
 
-    private fun plugin(sender: String? = VALID_SENDER): GraphMailPlugin =
+    private fun plugin(
+        sender: String? = VALID_SENDER,
+        allowlist: String? = "@test.nl",
+    ): GraphMailPlugin =
         GraphMailPlugin(mailClient, storage, eventPublisher).apply {
             tenantId = "tenant-id"
             clientId = "client-id"
             clientSecret = "client-secret"
+            // allowlist == null simulates a pre-allowlist configuration (property never injected).
+            if (allowlist != null) allowedSenders = allowlist
             testSenderMailbox = sender
         }
 
@@ -65,31 +73,12 @@ class GraphMailTestSendControllerTest {
         request: GraphMailTestSendRequest = GraphMailTestSendRequest(VALID_CONFIG_ID, VALID_RECIPIENT, VALID_SENDER),
     ) = controller.testSend(request, authentication)
 
-    // sendMail signature (12 params):
-    // tenantId(1), clientId(2), clientSecret(3), senderMailbox(4),
-    // toRecipients(5), ccRecipients(6), bccRecipients(7), replyToRecipients(8),
-    // subject(9), bodyHtml(10), attachments(11), saveToSentItems(12)
+    private fun stubSendMail() = whenever(mailClient.sendMail(any(), any()))
 
-    private fun stubSendMail() =
-        whenever(
-            mailClient.sendMail(
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-            ),
-        )
-
-    private fun stubPlugin(sender: String? = VALID_SENDER) =
-        whenever(pluginService.createInstance(any<PluginConfigurationId>())).thenReturn(plugin(sender))
+    private fun stubPlugin(
+        sender: String? = VALID_SENDER,
+        allowlist: String? = "@test.nl",
+    ) = whenever(pluginService.createInstance(any<PluginConfigurationId>())).thenReturn(plugin(sender, allowlist))
 
     // ── Input validation ──────────────────────────────────────────────────────────
 
@@ -156,6 +145,38 @@ class GraphMailTestSendControllerTest {
         assertFalse(response.body!!.success)
     }
 
+    // ── Sender allowlist enforcement ───────────────────────────────────────────────
+
+    @Test fun `returns 400 when allowedSenders is not configured`() {
+        stubPlugin(allowlist = null)
+        val response = send()
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+        assertFalse(response.body!!.success)
+        assertTrue(response.body!!.message.contains("allowedSenders"))
+    }
+
+    @Test fun `returns 400 when allowedSenders is blank`() {
+        stubPlugin(allowlist = "   ")
+        val response = send()
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+        assertFalse(response.body!!.success)
+    }
+
+    @Test fun `returns 403 when test sender is not on the allowlist`() {
+        stubPlugin(allowlist = "noreply@gemeente.nl")
+        val response = send(GraphMailTestSendRequest(VALID_CONFIG_ID, VALID_RECIPIENT, "ceo@gemeente.nl"))
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertFalse(response.body!!.success)
+        assertEquals(403, response.body!!.statusCode)
+    }
+
+    @Test fun `accepts test sender matching a domain allowlist entry`() {
+        stubPlugin(allowlist = "@test.nl")
+        val response = send()
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertTrue(response.body!!.success)
+    }
+
     // ── Happy path ─────────────────────────────────────────────────────────────────
 
     @Test fun `returns success when mail is sent`() {
@@ -181,78 +202,100 @@ class GraphMailTestSendControllerTest {
         assertEquals(429, secondResponse.body!!.statusCode)
     }
 
+    @Test fun `evicts stale rate limit entries once the store grows large`() {
+        stubPlugin()
+        val field = GraphMailTestSendController::class.java.getDeclaredField("rateLimitStore")
+        field.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val store = field.get(controller) as ConcurrentHashMap<String, AtomicLong>
+
+        // Mirrors the private RATE_LIMIT_INTERVAL_MS / RATE_LIMIT_STORE_MAX_ENTRIES constants in
+        // GraphMailTestSendController.kt. Pre-populate the store with entries that are already
+        // stale (older than the rate-limit window) to simulate a long-running instance that many
+        // distinct admins have used over time.
+        val rateLimitIntervalMs = 10_000L
+        val rateLimitStoreMaxEntries = 1_000
+        val staleTimestamp = System.currentTimeMillis() - rateLimitIntervalMs - 1_000
+        repeat(rateLimitStoreMaxEntries) { i -> store["stale-user-$i"] = AtomicLong(staleTimestamp) }
+        assertEquals(rateLimitStoreMaxEntries, store.size)
+
+        // The next request — from any user — crosses the size threshold and triggers the sweep;
+        // every pre-populated stale entry should be evicted, leaving only the new caller's entry.
+        send()
+
+        assertTrue(store.size < rateLimitStoreMaxEntries)
+    }
+
     @Test fun `passes decrypted credentials from plugin instance to mailClient`() {
         stubPlugin()
         send()
         verify(mailClient).sendMail(
-            eq("tenant-id"),
-            eq("client-id"),
-            eq("client-secret"),
-            eq(VALID_SENDER),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
+            eq(GraphCredentials("tenant-id", "client-id", "client-secret")),
+            argThat { senderMailbox == VALID_SENDER },
         )
     }
 
     @Test fun `sends to the recipient from the request`() {
         stubPlugin()
         send()
-        val captor = argumentCaptor<List<GraphRecipient>>()
-        verify(mailClient).sendMail(
-            any(),
-            any(),
-            any(),
-            any(),
-            captor.capture(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
+        val captor = argumentCaptor<OutboundMail>()
+        verify(mailClient).sendMail(any(), captor.capture())
+        assertEquals(1, captor.firstValue.toRecipients.size)
+        assertEquals(
+            VALID_RECIPIENT,
+            captor.firstValue.toRecipients[0]
+                .emailAddress.address,
         )
-        assertEquals(1, captor.firstValue.size)
-        assertEquals(VALID_RECIPIENT, captor.firstValue[0].emailAddress.address)
     }
 
     @Test fun `sends with saveToSentItems false`() {
         stubPlugin()
-        val captor = argumentCaptor<Boolean>()
+        val captor = argumentCaptor<OutboundMail>()
         send()
-        verify(mailClient).sendMail(
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            any(),
-            captor.capture(),
-        )
-        assertFalse(captor.firstValue)
+        verify(mailClient).sendMail(any(), captor.capture())
+        assertFalse(captor.firstValue.saveToSentItems)
     }
 
     // ── Error mapping ──────────────────────────────────────────────────────────────
 
-    @Test fun `maps GraphMailTokenExpiredException to 401`() {
+    @Test fun `maps GraphMailTokenExpiredException to HTTP 502 with Graph status 401 in the body`() {
         stubPlugin()
         stubSendMail().thenThrow(GraphMailTokenExpiredException("token expired"))
         val response = send()
-        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        // Upstream 401 is surfaced as 502: Graph refused OUR token, the admin's session is fine.
+        assertEquals(HttpStatus.BAD_GATEWAY, response.statusCode)
         assertFalse(response.body!!.success)
         assertEquals(401, response.body!!.statusCode)
         assertTrue(response.body!!.message.contains("Client Secret"))
+    }
+
+    @Test fun `a generic upstream 401 also becomes HTTP 502`() {
+        // Not only the typed token exception: any Graph 401 must stay off the wire as a 401, or the
+        // frontend's auth interceptor reads it as an expired admin session and logs the user out.
+        stubPlugin()
+        stubSendMail().thenThrow(GraphMailException("unauthorized", statusCode = 401))
+
+        val response = send()
+
+        assertEquals(HttpStatus.BAD_GATEWAY, response.statusCode)
+        assertEquals(401, response.body!!.statusCode)
+    }
+
+    @Test fun `an exception message containing an address is masked in the response`() {
+        // RestClientException embeds the request URI, and the sender mailbox sits in that path.
+        stubPlugin()
+        stubSendMail().thenThrow(
+            GraphMailException(
+                """I/O error on POST request for "https://graph.microsoft.com/v1.0/users/geheim@gemeente.nl/sendMail"""",
+                statusCode = 500,
+            ),
+        )
+
+        val response = send()
+
+        val message = response.body!!.message
+        assertFalse(message.contains("geheim@gemeente.nl"), "raw address leaked to the admin UI: $message")
+        assertTrue(message.contains("g***@gemeente.nl"), "expected a masked address, got: $message")
     }
 
     @Test fun `maps 403 GraphMailException to Mail Send permission message`() {

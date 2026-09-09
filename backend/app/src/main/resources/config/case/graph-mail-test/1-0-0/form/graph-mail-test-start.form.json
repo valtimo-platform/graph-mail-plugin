@@ -1,0 +1,126 @@
+{
+    "display": "form",
+    "components": [
+        {
+            "key": "uitleg",
+            "type": "htmlelement",
+            "input": false,
+            "label": "Uitleg",
+            "content": "<p>Start een testverzending via de Graph Mail plugin. De afzender moet op de <strong>allowedSenders</strong>-whitelist van de pluginconfiguratie staan, anders wordt de verzending geweigerd voordat er een token wordt aangevraagd.</p>",
+            "tableView": false,
+            "refreshOnChange": false
+        },
+        {
+            "key": "pv:senderMailbox",
+            "type": "textfield",
+            "input": true,
+            "label": "Afzender",
+            "description": "Moet voorkomen op allowedSenders. Vul bewust een adres in dat er niet op staat om testgeval T2 uit te lokken.",
+            "placeholder": "noreply@gemeente.nl",
+            "validate": {
+                "required": true
+            },
+            "tableView": true,
+            "applyMaskOn": "change"
+        },
+        {
+            "key": "pv:recipients",
+            "type": "textfield",
+            "input": true,
+            "label": "Ontvangers",
+            "description": "Eén adres, een kommalijst of een JSON-array.",
+            "placeholder": "jij@voorbeeld.nl, collega@voorbeeld.nl",
+            "validate": {
+                "required": true
+            },
+            "tableView": true,
+            "applyMaskOn": "change"
+        },
+        {
+            "key": "pv:cc",
+            "type": "textfield",
+            "input": true,
+            "label": "CC",
+            "tableView": false,
+            "applyMaskOn": "change"
+        },
+        {
+            "key": "pv:bcc",
+            "type": "textfield",
+            "input": true,
+            "label": "BCC",
+            "description": "Controleer bij ontvangst dat deze adressen niet zichtbaar zijn voor de andere ontvangers.",
+            "tableView": false,
+            "applyMaskOn": "change"
+        },
+        {
+            "key": "pv:replyTo",
+            "type": "textfield",
+            "input": true,
+            "label": "Reply-To",
+            "tableView": false,
+            "applyMaskOn": "change"
+        },
+        {
+            "key": "pv:subject",
+            "type": "textfield",
+            "input": true,
+            "label": "Onderwerp",
+            "description": "Het volgnummer van de verzending wordt hier automatisch achter geplakt.",
+            "defaultValue": "Testmail Graph Mail plugin",
+            "validate": {
+                "required": true
+            },
+            "tableView": true,
+            "applyMaskOn": "change"
+        },
+        {
+            "key": "pv:bodyText",
+            "type": "textarea",
+            "input": true,
+            "label": "Berichttekst",
+            "description": "Wordt als HTML-body in tijdelijke opslag gezet. De tekst wordt ge-escaped.",
+            "defaultValue": "Dit is een testbericht vanuit de sandbox.",
+            "rows": 4,
+            "tableView": false,
+            "applyMaskOn": "change"
+        },
+        {
+            "key": "pv:attachmentKb",
+            "type": "number",
+            "input": true,
+            "label": "Bijlage (KB)",
+            "description": "0 = geen bijlage. Onder 2048 blijft de plugin inline; daarboven gaat hij via concept + upload-sessie en is Mail.ReadWrite vereist. Maximum 8192.",
+            "defaultValue": 0,
+            "validate": {
+                "min": 0,
+                "max": 8192
+            },
+            "tableView": true
+        },
+        {
+            "key": "pv:herhalingen",
+            "type": "number",
+            "input": true,
+            "label": "Aantal verzendingen",
+            "description": "Meer dan 1 laat het proces terugkeren naar dezelfde send-email taak — dat is testgeval T8. Alleen hele getallen; een decimale waarde wordt naar beneden afgekapt.",
+            "defaultValue": 1,
+            "validate": {
+                "required": true,
+                "min": 1,
+                "max": 25,
+                "integer": true
+            },
+            "tableView": true,
+            "decimalLimit": 0
+        },
+        {
+            "key": "submit",
+            "type": "button",
+            "input": true,
+            "label": "Verstuur testmail",
+            "tableView": false,
+            "disableOnInvalid": true
+        }
+    ]
+}

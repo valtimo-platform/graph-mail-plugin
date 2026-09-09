@@ -1,0 +1,20 @@
+[
+    {
+        "activityId": "send-email",
+        "activityType": "bpmn:ServiceTask:start",
+        "processLinkType": "plugin",
+        "pluginDefinitionKey": "entra",
+        "pluginActionDefinitionKey": "send-email",
+        "pluginConfigurationId": "VUL-HIER-DE-UUID-VAN-JE-PLUGINCONFIGURATIE-IN",
+        "actionProperties": {
+            "senderMailbox": "pv:senderMailbox",
+            "recipients": "pv:recipients",
+            "cc": "pv:cc",
+            "bcc": "pv:bcc",
+            "replyTo": "pv:replyTo",
+            "subject": "pv:subjectResolved",
+            "contentId": "pv:bodyContentId",
+            "attachmentIds": "pv:attachmentResourceIds"
+        }
+    }
+]

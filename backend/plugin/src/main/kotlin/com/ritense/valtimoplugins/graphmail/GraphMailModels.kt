@@ -1,5 +1,6 @@
 package com.ritense.valtimoplugins.graphmail
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 
@@ -37,11 +38,45 @@ class ResolvedAttachment(
     val sizeBytes: Long get() = rawBytes.size.toLong()
 }
 
+// Azure Entra app registration credentials for OAuth2 Client Credentials — grouped so
+// GraphMailClient callers pass one value instead of three positional strings repeated
+// across the interface, the implementation, and every internal retry/draft-flow method.
+data class GraphCredentials(
+    val tenantId: String,
+    val clientId: String,
+    val clientSecret: String,
+) {
+    // Kotlin's generated toString() would otherwise print clientSecret in plaintext — override
+    // it so an accidental debug log statement, or a failed test assertion printing this object,
+    // can never leak the secret.
+    override fun toString(): String = "GraphCredentials(tenantId=$tenantId, clientId=$clientId, clientSecret=***)"
+}
+
+// Everything needed to send one email via Graph, grouped for the same reason as
+// [GraphCredentials]. Optional recipient lists and saveToSentItems default so callers only
+// need to name the fields that matter for their call site.
+data class OutboundMail(
+    val senderMailbox: String,
+    val toRecipients: List<GraphRecipient>,
+    val ccRecipients: List<GraphRecipient> = emptyList(),
+    val bccRecipients: List<GraphRecipient> = emptyList(),
+    val replyToRecipients: List<GraphRecipient> = emptyList(),
+    val subject: String,
+    val bodyHtml: String,
+    val attachments: List<ResolvedAttachment> = emptyList(),
+    val saveToSentItems: Boolean = true,
+)
+
 internal data class TokenResponse(
     @JsonProperty("access_token") val accessToken: String,
     @JsonProperty("token_type") val tokenType: String,
     @JsonProperty("expires_in") val expiresIn: Int,
-)
+) {
+    // Same reasoning as GraphCredentials.toString() — accessToken is a live, directly usable
+    // bearer credential for the token's full lifetime. Kotlin's generated toString() would
+    // print it in plaintext if this object ever reached a debug log line or a failed assertion.
+    override fun toString(): String = "TokenResponse(accessToken=***, tokenType=$tokenType, expiresIn=$expiresIn)"
+}
 
 data class SendMailRequest(
     @JsonProperty("message") val message: GraphMessage,
@@ -60,8 +95,8 @@ data class GraphMessage(
     @JsonProperty("replyTo") val replyTo: List<GraphRecipient> = emptyList(),
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     @JsonProperty("attachments") val attachments: List<GraphAttachment> = emptyList(),
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonProperty("from") val from: GraphRecipient? = null,
+    // No `from`: the sender comes from the /users/{mailbox} path on every call, so the field was
+    // never populated and Graph would reject a value that disagreed with the path anyway.
 )
 
 data class GraphBody(
@@ -101,6 +136,13 @@ data class UploadAttachmentItem(
     @JsonProperty("name") val name: String,
     @JsonProperty("size") val size: Long,
     @JsonProperty("contentType") val contentType: String,
+)
+
+// Returned by each chunk PUT while an upload is still in progress. The final chunk returns the
+// created attachment instead, with no nextExpectedRanges — hence the nullable field.
+@JsonIgnoreProperties(ignoreUnknown = true)
+internal data class UploadChunkResponse(
+    @JsonProperty("nextExpectedRanges") val nextExpectedRanges: List<String>? = null,
 )
 
 internal data class UploadSessionResponse(

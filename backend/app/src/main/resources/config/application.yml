@@ -30,7 +30,9 @@ spring:
             client-id: valtimo-console
           keycloakapi:
             client-id: valtimo-user-m2m-client
-            client-secret: 6ef6ca16-6b86-482a-a3d9-0561704c1db9
+            # Default is de bekende secret van de lokale Keycloak-sandbox (imports/keycloak/realm.json).
+            # Uitsluitend voor lokale ontwikkeling — override via env var, nooit in productie gebruiken.
+            client-secret: ${KEYCLOAK_M2M_CLIENT_SECRET:6ef6ca16-6b86-482a-a3d9-0561704c1db9}
             authorization-grant-type: authorization_code
             scope: openid
   liquibase:
@@ -66,6 +68,14 @@ server:
     mime-types: text/html,text/xml,text/plain,text/css, application/javascript, application/json
     min-response-size: 1024
 
+graph-mail:
+  http:
+    # Defaults staan al op de Microsoft-endpoints; expliciet vermeld zodat zichtbaar is waar
+    # deze instellingen leven sinds ze geen pluginproperties meer zijn.
+    token-base-url: https://login.microsoftonline.com
+    graph-base-url: https://graph.microsoft.com
+    attachment-concurrency: 8
+
 valtimo:
   database: postgres
   app:
@@ -81,7 +91,10 @@ valtimo:
       hosts:
         - localhost
   plugin:
-    encryption-secret: "abcdefghijklmnop"
+    # Sleutel waarmee alle plugin-secrets (o.a. het Graph clientSecret) in de database worden
+    # versleuteld; moet exact 16, 24 of 32 bytes zijn. De default hieronder is een publiek
+    # bekende ontwikkelwaarde — zet in elke echte omgeving een eigen sleutel via de env var.
+    encryption-secret: ${VALTIMO_PLUGIN_ENCRYPTION_SECRET:abcdefghijklmnop}
   docker:
     filter:
       enabled: true
@@ -137,9 +150,17 @@ operaton:
       properties:
         deploy-changed-only: true
         enforceHistoryTimeToLive: false
-    job-executor:
+    # LET OP: de sleutel is `job-execution`, niet `job-executor`. De Operaton-starter bindt
+    # JobExecutionProperty onder die naam en Spring negeert een onbekende sleutel stilzwijgend —
+    # met `job-executor` draaide deze sandbox ongemerkt op de standaarden 3/10.
+    job-execution:
+      # Zie documentation/developer.md — een verzending bezet een job-executor thread zolang de
+      # Graph-aanroep loopt, en bij bijlagen boven 2 MiB zolang de upload duurt.
       core-pool-size: 20
       max-pool-size: 50
+      # Klein gehouden: bij een thread-pool-executor worden threads bóven core-pool-size pas
+      # aangemaakt wanneer de wachtrij vol is, dus een grote queue maakt max-pool-size betekenisloos.
+      queue-capacity: 10
 
 implementation:
   suwinet:
