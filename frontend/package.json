@@ -61,7 +61,7 @@
         "@valtimo/document": "13.41.0",
         "@valtimo/form": "13.41.0",
         "@valtimo/form-flow-management": "13.41.0",
-        "@valtimo/form-management": "13.41.0",
+        "@valtimo/form-management": "13.44.0",
         "@valtimo/iko": "13.41.0",
         "@valtimo/keycloak": "13.41.0",
         "@valtimo/layout": "13.41.0",
