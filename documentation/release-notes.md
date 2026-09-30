@@ -2,6 +2,10 @@
 
 Overzicht van wijzigingen per versie van de Graph Mail-plugin.
 
+## 1.0.5
+
+Ondersteuning voor Valtimo 13.48.0.
+
 ## 1.0.4
 
 Een grote release. Het verzenden is betrouwbaar gemaakt onder de omstandigheden waarin het eerder
