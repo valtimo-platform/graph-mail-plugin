@@ -99,7 +99,7 @@
         "d3-sankey": "0.12.3",
         "d3-shape": "3.2.0",
         "deepmerge-ts": "7.1.5",
-        "diagram-js": "15.3.0",
+        "diagram-js": "15.28.0",
         "dmn-js": "17.2.0",
         "dropzone": "6.0.0-beta.2",
         "flatpickr": "4.6.13",
