@@ -1,7 +1,6 @@
 package com.ritense.valtimoplugins.graphmail
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.ritense.plugin.repository.PluginConfigurationRepository
 import com.ritense.plugin.service.PluginService
 import com.ritense.resource.service.TemporaryResourceStorageService
 import org.slf4j.LoggerFactory
@@ -10,14 +9,13 @@ import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.EnableAspectJAutoProxy
 import org.springframework.context.event.EventListener
 import org.springframework.core.annotation.Order
+import org.springframework.core.env.Environment
 import org.springframework.http.client.JdkClientHttpRequestFactory
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.web.client.RestClient
@@ -27,13 +25,13 @@ import java.net.ProxySelector
 import java.net.URI
 import java.net.http.HttpClient
 import java.time.Duration
+import javax.net.ssl.SSLContext
 
 // IMPORTANT: this file uses line comments only, on purpose. Kotlin block comments nest, so
 // an Ant path pattern (such as the security matcher below, which ends with a double star)
 // written inside a KDoc block comment would open an inner comment that is never closed and
 // swallows the rest of the file. Keeping all doc text in line comments avoids that trap.
 @AutoConfiguration
-@EnableAspectJAutoProxy
 @EnableConfigurationProperties(GraphMailHttpProperties::class)
 class GraphMailAutoConfiguration {
     private val logger = LoggerFactory.getLogger(GraphMailAutoConfiguration::class.java)
@@ -63,8 +61,8 @@ class GraphMailAutoConfiguration {
         )
     }
 
-    // ONE pooled client for the whole application, shared by the plugin action path and the
-    // test-send endpoint alike.
+    // ONE pooled client for all Graph traffic without certificates, shared by the plugin action path
+    // and the test-send endpoint alike (with certificates: graphMailCertificateRestClients).
     //
     // The JDK's own HttpClient is used rather than Apache HttpClient5 on purpose: it pools
     // connections out of the box and ships with the JVM, so the plugin does not have to assume
@@ -78,8 +76,56 @@ class GraphMailAutoConfiguration {
     fun graphMailRestClient(
         objectMapper: ObjectMapper,
         properties: GraphMailHttpProperties,
+    ): RestClient = graphRestClient(objectMapper, properties)
+
+    // The clients for client certificates (mTLS through a gateway): built exactly like the default
+    // one, so proxy, timeouts, redirects, protocol and converters stay the same; only the TLS
+    // settings come from the selected Http Client Authentication configuration (sslContext()).
+    @Bean
+    @ConditionalOnMissingBean(GraphMailCertificateRestClients::class)
+    fun graphMailCertificateRestClients(
+        objectMapper: ObjectMapper,
+        properties: GraphMailHttpProperties,
+    ): GraphMailCertificateRestClients =
+        GraphMailCertificateRestClients { sslContext -> graphRestClient(objectMapper, properties, sslContext) }
+
+    @Bean
+    @ConditionalOnMissingBean(GraphMailLogin::class)
+    fun graphMailLogin(
+        pluginService: PluginService,
+        clientSecretLogin: GraphMailClientSecretLogin,
+    ): GraphMailLogin = GraphMailLogin(pluginService, clientSecretLogin)
+
+    // The deprecated 1.x login, for configurations without an Http Client Authentication configuration. Over the
+    // shared Graph client, as in 1.x: its proxy and timeouts apply to the token request too.
+    @Bean
+    @ConditionalOnMissingBean(GraphMailClientSecretLogin::class)
+    fun graphMailClientSecretLogin(
+        @Qualifier("graphMailRestClient") graphMailRestClient: RestClient,
+        properties: GraphMailHttpProperties,
+        graphTokenCache: GraphTokenCache,
+    ): GraphMailClientSecretLogin =
+        GraphMailClientSecretLogin(
+            restClient = graphMailRestClient,
+            tokenBaseUrl = properties.tokenBaseUrl,
+            graphBaseUrl = properties.graphBaseUrl,
+            tokenCache = graphTokenCache,
+        )
+
+    // Single shared instance — see GraphTokenCache's class doc for why the cache must be a bean:
+    // Valtimo hydrates a fresh GraphMailPlugin per action invocation, so an instance-owned cache
+    // never accumulated hits. Only the deprecated client-secret login uses it; the Http Client
+    // Authentication plugin caches its own tokens.
+    @Bean
+    @ConditionalOnMissingBean(GraphTokenCache::class)
+    fun graphTokenCache(): GraphTokenCache = GraphTokenCache()
+
+    internal fun graphRestClient(
+        objectMapper: ObjectMapper,
+        properties: GraphMailHttpProperties,
+        sslContext: SSLContext? = null,
     ): RestClient {
-        val httpClient = graphHttpClient(properties)
+        val httpClient = graphHttpClient(properties, sslContext)
 
         val requestFactory =
             JdkClientHttpRequestFactory(httpClient).apply {
@@ -98,11 +144,16 @@ class GraphMailAutoConfiguration {
     // Extracted so a test can assert on the client itself: the regression this guards against was a
     // missing ProxySelector, and that is only visible on the HttpClient — not on the RestClient
     // built around it.
-    internal fun graphHttpClient(properties: GraphMailHttpProperties): HttpClient {
+    internal fun graphHttpClient(
+        properties: GraphMailHttpProperties,
+        sslContext: SSLContext? = null,
+    ): HttpClient {
         val proxySelector = proxySelectorFor(properties)
-        logProxyInUse(proxySelector, properties)
+        // Once, for the default client: a certificate client may be built per send.
+        if (sslContext == null) logProxyInUse(proxySelector, properties)
         return HttpClient
             .newBuilder()
+            .let { builder -> if (sslContext != null) builder.sslContext(sslContext) else builder }
             .connectTimeout(Duration.ofSeconds(properties.connectTimeoutSeconds))
             .followRedirects(HttpClient.Redirect.NEVER)
             // Pinned to HTTP/1.1 deliberately. The JDK client defaults to HTTP/2, which would make
@@ -175,57 +226,20 @@ class GraphMailAutoConfiguration {
         }
     }
 
-    // Requires the client secret to be re-entered whenever the sender allowlist changes — the
-    // allowlist bounds which mailboxes Mail.Send may be used for, so widening it is a privilege
-    // escalation. See the class doc for why this has to be an aspect and not a plugin event.
-    //
-    // Guarded by a property so an operator can switch it off deliberately if it ever blocks them,
-    // rather than being tempted to patch it out. Off is a real reduction in protection, so it has
-    // to be an explicit, visible choice.
-    @Bean
-    @ConditionalOnProperty(
-        prefix = "graph-mail",
-        name = ["require-secret-for-allowlist-change"],
-        havingValue = "true",
-        matchIfMissing = true,
-    )
-    @ConditionalOnMissingBean(AllowedSendersChangeGuard::class)
-    fun allowedSendersChangeGuard(
-        pluginConfigurationRepository: PluginConfigurationRepository,
-    ): AllowedSendersChangeGuard = AllowedSendersChangeGuard(pluginConfigurationRepository)
-
-    // Deliberately tied to the same condition as the guard: when the guard is on, its absence must
-    // fail startup; when an operator has switched it off, there is nothing to verify.
-    @Bean
-    @ConditionalOnProperty(
-        prefix = "graph-mail",
-        name = ["require-secret-for-allowlist-change"],
-        havingValue = "true",
-        matchIfMissing = true,
-    )
-    @ConditionalOnMissingBean(GraphMailGuardStartupCheck::class)
-    fun graphMailGuardStartupCheck(pluginService: PluginService): GraphMailGuardStartupCheck =
-        GraphMailGuardStartupCheck(pluginService)
-
-    // Registered as its own bean rather than a listener on this class, mirroring
-    // GraphMailGuardStartupCheck: this class is instantiated directly in tests and must stay
-    // no-arg. See the class doc for why a loud line, and not a refusal to start.
+    // Registered as its own bean rather than a listener on this class: this class is instantiated
+    // directly in tests and must stay no-arg. See the class doc for why a loud line, and not a
+    // refusal to start.
     @Bean
     @ConditionalOnMissingBean(GraphMailEndpointAllowlistWarning::class)
     fun graphMailEndpointAllowlistWarning(properties: GraphMailHttpProperties): GraphMailEndpointAllowlistWarning =
         GraphMailEndpointAllowlistWarning(properties)
 
-    // Single shared instance — see GraphTokenCache's class doc for why the cache must be a
-    // bean rather than something each GraphMailClientImpl owns: Valtimo hydrates a fresh
-    // GraphMailPlugin per action invocation, so an instance-owned cache never accumulated hits.
+    // Same pattern: a setting removed in 1.1.0 is reported rather than ignored silently.
     @Bean
-    @ConditionalOnMissingBean(GraphTokenCache::class)
-    fun graphTokenCache(): GraphTokenCache = GraphTokenCache()
+    @ConditionalOnMissingBean(GraphMailRemovedSettingWarning::class)
+    fun graphMailRemovedSettingWarning(environment: Environment): GraphMailRemovedSettingWarning =
+        GraphMailRemovedSettingWarning(environment)
 
-    // Single shared instance for the same reason as graphTokenCache() above: a fresh
-    // GraphMailPlugin per action invocation means an instance-owned guard would never see the
-    // marker left by an earlier attempt of the same activity. See SendIdempotencyGuard's class
-    // doc for what failure mode this does and does not protect against.
     // Where "already sent" is remembered. The default is in-memory and therefore per-JVM: on a
     // multi-node GZAC a retry picked up by another node has never heard of the marker, so the guard
     // offers no protection there. Registering it separately means a deployment that needs the
@@ -235,6 +249,10 @@ class GraphMailAutoConfiguration {
     @ConditionalOnMissingBean(SentMarkerStore::class)
     fun sentMarkerStore(): SentMarkerStore = InMemorySentMarkerStore()
 
+    // Single shared instance: Valtimo hydrates a fresh GraphMailPlugin per action invocation, so an
+    // instance-owned guard would never see the marker left by an earlier attempt of the same
+    // activity. See SendIdempotencyGuard's class doc for what failure mode this does and does not
+    // protect against.
     @Bean
     @ConditionalOnMissingBean(SendIdempotencyGuard::class)
     fun sendIdempotencyGuard(sentMarkerStore: SentMarkerStore): SendIdempotencyGuard =
@@ -258,15 +276,14 @@ class GraphMailAutoConfiguration {
         // otherwise be injected here — silently sending Graph traffic through a client with
         // different timeouts, redirect handling and converters.
         @Qualifier("graphMailRestClient") graphMailRestClient: RestClient,
-        graphTokenCache: GraphTokenCache,
         properties: GraphMailHttpProperties,
+        certificateRestClients: GraphMailCertificateRestClients,
     ): GraphMailClient =
         GraphMailClientImpl(
             restClient = graphMailRestClient,
-            tokenBaseUrl = properties.tokenBaseUrl,
             graphBaseUrl = properties.graphBaseUrl,
-            tokenCache = graphTokenCache,
             uploadHostSuffixes = properties.uploadHostSuffixes(),
+            certificateRestClients = certificateRestClients::forSslContext,
         )
 
     // ObjectProvider rather than a nullable parameter: it resolves lazily and to nothing at all
@@ -303,6 +320,7 @@ class GraphMailAutoConfiguration {
         sendIdempotencyGuard: SendIdempotencyGuard,
         attachmentConcurrencyLimiter: AttachmentConcurrencyLimiter,
         metrics: GraphMailMetrics,
+        login: GraphMailLogin,
     ): GraphMailPluginFactory =
         GraphMailPluginFactory(
             pluginService,
@@ -312,6 +330,7 @@ class GraphMailAutoConfiguration {
             sendIdempotencyGuard,
             attachmentConcurrencyLimiter,
             metrics,
+            login,
         )
 
     @Bean

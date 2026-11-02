@@ -20,7 +20,7 @@ een process-link verwijst naar de UUID van een pluginconfiguratie, en die bestaa
 configuratie in het beheerscherm hebt aangemaakt. Een gefixeerde UUID meeleveren zou niet werken.
 
 1. Maak de pluginconfiguratie aan via **Admin → Plugins → Microsoft Graph Mail Plugin**
-   (tenant-id, client-id, client secret en `allowedSenders`).
+   (een Http Client Authentication-configuratie kiezen en `allowedSenders`; zie documentation/handleiding.md).
 2. Koppel de `send-email`-taak aan de actie. Twee wegen:
    - **Via het beheerscherm** (aanbevolen): Admin → Processen → `Graph Mail Test` → koppel de taak
      `send-email` aan de actie *Send email* en vul de eigenschappen in volgens de tabel hieronder.

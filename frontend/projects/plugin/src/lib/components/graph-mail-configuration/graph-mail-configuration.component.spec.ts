@@ -1,6 +1,11 @@
+import {CommonModule} from '@angular/common';
+import {CUSTOM_ELEMENTS_SCHEMA} from '@angular/core';
+import {TestBed} from '@angular/core/testing';
+import {FormsModule} from '@angular/forms';
 import {HttpClient} from '@angular/common/http';
 import {ConfigService} from '@valtimo/shared';
-import {of} from 'rxjs';
+import {PluginManagementService, PluginTranslatePipeModule, PluginTranslationService} from '@valtimo/plugin';
+import {Observable, of, Subject, throwError} from 'rxjs';
 import {GraphMailPluginConfigurationComponent} from './graph-mail-configuration.component';
 import {GraphMailPluginConfig} from '../../models';
 
@@ -10,21 +15,30 @@ import {GraphMailPluginConfig} from '../../models';
 describe('GraphMailPluginConfigurationComponent', () => {
   let httpSpy: jasmine.SpyObj<HttpClient>;
   let configServiceStub: Pick<ConfigService, 'config'>;
+  let pluginManagementSpy: jasmine.SpyObj<PluginManagementService>;
   let component: GraphMailPluginConfigurationComponent;
+
+  const createComponent = (): GraphMailPluginConfigurationComponent =>
+    new GraphMailPluginConfigurationComponent(
+      httpSpy,
+      configServiceStub as ConfigService,
+      pluginManagementSpy,
+    );
 
   const baseFormValue: GraphMailPluginConfig = {
     configurationId: '00000000-0000-0000-0000-000000000000',
     configurationTitle: 'Test config',
-    tenantId: '11111111-1111-1111-1111-111111111111',
-    clientId: '22222222-2222-2222-2222-222222222222',
-    clientSecret: undefined,
     allowedSenders: 'noreply@gemeente.nl',
   };
 
   beforeEach(() => {
     httpSpy = jasmine.createSpyObj<HttpClient>('HttpClient', ['get', 'post']);
     configServiceStub = {config: {valtimoApi: {endpointUri: '/api/'}} as any};
-    component = new GraphMailPluginConfigurationComponent(httpSpy, configServiceStub as ConfigService);
+    pluginManagementSpy = jasmine.createSpyObj<PluginManagementService>('PluginManagementService', [
+      'getPluginConfigurationsByCategory',
+    ]);
+    pluginManagementSpy.getPluginConfigurationsByCategory.and.returnValue(of([]));
+    component = createComponent();
     component.pluginId = 'entra';
   });
 
@@ -63,146 +77,13 @@ describe('GraphMailPluginConfigurationComponent', () => {
     expect(component.allowedSendersInvalid).toBeTrue();
   });
 
-  // ── tenantId / clientId UUID validation ────────────────────────────────────────────────
-
-  it('flags a non-UUID tenantId as invalid', () => {
-    component.formValueChange({...baseFormValue, tenantId: 'not-a-uuid'});
-    expect(component.tenantIdInvalid).toBeTrue();
-  });
-
-  it('accepts a well-formed UUID tenantId', () => {
-    component.formValueChange(baseFormValue);
-    expect(component.tenantIdInvalid).toBeFalse();
-  });
-
-  // ── Changing the sender allowlist requires the client secret ───────────────────────────
-  // The allowlist bounds which mailboxes this plugin may send as, so widening it is a privilege
-  // escalation. The backend enforces the same rule in AllowedSendersChangeGuard; these specs cover
-  // the immediate feedback in the form.
-
   // Emitted validity is what actually gates the save button.
   const validityOf = (comp: GraphMailPluginConfigurationComponent): boolean =>
     (comp as any).valid$.getValue();
 
-  const existingConfigWithAllowlist = (allowlist: string): void => {
-    component.savedConfigurationId = '33333333-3333-3333-3333-333333333333';
-    (component as any).originalAllowedSenders = allowlist;
-  };
-
-  it('keeps an existing configuration saveable without the secret when nothing changed', () => {
-    existingConfigWithAllowlist('noreply@gemeente.nl');
-    component.formValueChange({...baseFormValue, allowedSenders: 'noreply@gemeente.nl'});
-
-    expect(component.secretRequiredForAllowlistChange).toBeFalse();
-    expect(validityOf(component)).toBeTrue();
-  });
-
-  it('does not treat reordering or respacing the allowlist as a change', () => {
-    existingConfigWithAllowlist('noreply@gemeente.nl, @gemeente.nl');
-    component.formValueChange({
-      ...baseFormValue,
-      allowedSenders: '@GEMEENTE.NL,  noreply@Gemeente.nl ',
-    });
-
-    expect(component.secretRequiredForAllowlistChange).toBeFalse();
-    expect(validityOf(component)).toBeTrue();
-  });
-
-  it('does not treat a repeated allowlist entry as a change', () => {
-    // Must agree with the backend, which compares as a Set. Disagreeing here means the form demands
-    // the secret for a list the backend would have accepted unchanged.
-    existingConfigWithAllowlist('noreply@gemeente.nl');
-    component.formValueChange({
-      ...baseFormValue,
-      allowedSenders: 'noreply@gemeente.nl,noreply@gemeente.nl',
-    });
-
-    expect(component.secretRequiredForAllowlistChange).toBeFalse();
-    expect(validityOf(component)).toBeTrue();
-  });
-
-  it('does not treat trailing or repeated separators as a change', () => {
-    existingConfigWithAllowlist('noreply@gemeente.nl,@gemeente.nl');
-    component.formValueChange({
-      ...baseFormValue,
-      allowedSenders: 'noreply@gemeente.nl,,@gemeente.nl,',
-    });
-
-    expect(component.secretRequiredForAllowlistChange).toBeFalse();
-    expect(validityOf(component)).toBeTrue();
-  });
-
-  it('treats the bracketed list form as the same list as the comma-separated one', () => {
-    // The backend's parseStringListParam accepts the JSON-array form. A stored value in that shape
-    // must not make every subsequent edit look like a change.
-    existingConfigWithAllowlist('["noreply@gemeente.nl","@gemeente.nl"]');
-    component.formValueChange({
-      ...baseFormValue,
-      allowedSenders: 'noreply@gemeente.nl,@gemeente.nl',
-    });
-
-    expect(component.secretRequiredForAllowlistChange).toBeFalse();
-    expect(validityOf(component)).toBeTrue();
-  });
-
-  it('blocks saving a changed allowlist while the secret is empty', () => {
-    existingConfigWithAllowlist('noreply@gemeente.nl');
-    component.formValueChange({
-      ...baseFormValue,
-      allowedSenders: 'noreply@gemeente.nl,ceo@gemeente.nl',
-    });
-
-    expect(component.secretRequiredForAllowlistChange).toBeTrue();
-    expect(validityOf(component)).toBeFalse();
-  });
-
-  it('allows saving a changed allowlist once the secret is re-entered', () => {
-    existingConfigWithAllowlist('noreply@gemeente.nl');
-    component.formValueChange({
-      ...baseFormValue,
-      allowedSenders: 'noreply@gemeente.nl,ceo@gemeente.nl',
-    });
-    expect(validityOf(component)).toBeFalse();
-
-    component.clientSecretValue = 's3cret';
-    component.onSecretChange();
-
-    expect(component.secretRequiredForAllowlistChange).toBeFalse();
-    expect(validityOf(component)).toBeTrue();
-  });
-
-  it('treats removing an allowlist entry as a change too', () => {
-    existingConfigWithAllowlist('noreply@gemeente.nl,ceo@gemeente.nl');
-    component.formValueChange({...baseFormValue, allowedSenders: 'noreply@gemeente.nl'});
-
-    expect(component.secretRequiredForAllowlistChange).toBeTrue();
-    expect(validityOf(component)).toBeFalse();
-  });
-
-  it('captures the stored allowlist from the prefill so a change can be detected', () => {
-    component.prefillConfiguration$ = of({
-      ...baseFormValue,
-      id: 'ccc',
-      allowedSenders: 'noreply@gemeente.nl',
-    } as any);
-    component.save$ = of();
-    httpSpy.get.and.returnValue(of([]));
-
-    component.ngOnInit();
-
-    expect((component as any).originalAllowedSenders).toBe('noreply@gemeente.nl');
-  });
-
-  it('still requires the secret for a brand new configuration', () => {
-    component.savedConfigurationId = null;
-    component.formValueChange({...baseFormValue, allowedSenders: 'noreply@gemeente.nl'});
-
-    expect(validityOf(component)).toBeFalse();
-  });
-
   // ── canSendTest: the ambiguous-configuration guard ─────────────────────────────────────
   // Regression coverage for the fix where an unresolved configuration match used to fall back
-  // to "the first configuration for this plugin" — silently testing with the wrong credentials.
+  // to "the first configuration for this plugin" — silently testing with the wrong login.
 
   it('blocks sending a test email while the configuration is ambiguous, even if otherwise valid', () => {
     component.savedConfigurationId = '33333333-3333-3333-3333-333333333333';
@@ -305,6 +186,402 @@ describe('GraphMailPluginConfigurationComponent', () => {
       expect(component.configurationAmbiguous).toBeFalse();
       expect(component.savedConfigurationId).toBe('ccc');
       done();
+    });
+  });
+  // ── The login (authenticationPluginConfiguration) ───────────────────────────────────────
+
+  const entraLogin = {
+    id: 'login-1',
+    title: 'Graph login',
+    properties: {
+      authenticationType: 'TOKEN_EXCHANGE',
+      tokenEndpoint: 'https://login.microsoftonline.com/tenant/oauth2/v2.0/token',
+      clientId: 'client',
+      scope: 'https://graph.microsoft.com/.default',
+    },
+    pluginDefinition: {key: 'http-client-authentication'} as any,
+  };
+
+  const loginWith = (id: string, properties: object) => ({...entraLogin, id, title: id, properties});
+
+  // A component for a configuration with [reference] stored, whose select offers [configurations].
+  const withStoredReference = (
+    reference: string | undefined,
+    configurations: Array<any> = [entraLogin],
+    stored: object = {},
+  ) => {
+    pluginManagementSpy.getPluginConfigurationsByCategory.and.returnValue(of(configurations));
+    component = createComponent();
+    component.pluginId = 'entra';
+    component.prefillConfiguration$ = of(
+      {...baseFormValue, id: 'ccc', authenticationPluginConfiguration: reference, ...stored} as any,
+    );
+    const save$ = new Subject<void>();
+    component.save$ = save$;
+    component.ngOnInit();
+    const values: GraphMailPluginConfig[] = [];
+    component.configuration.subscribe(value => values.push(value));
+    return {save$, values};
+  };
+
+  it('offers the Http Client Authentication configurations, with the stored one selected', () => {
+    withStoredReference('login-1');
+
+    expect(pluginManagementSpy.getPluginConfigurationsByCategory).toHaveBeenCalledWith('http-client-authentication');
+    expect(component.loginOptions).toEqual([{id: 'login-1', title: 'Graph login', problem: null}]);
+    expect(component.loginConfigurationValue).toBe('login-1');
+    expect(component.unknownLoginConfiguration).toBeNull();
+  });
+
+  it('requires a login: a new configuration without one cannot be saved', () => {
+    const {save$, values} = withStoredReference(undefined);
+    component.formValueChange({...baseFormValue});
+
+    expect(validityOf(component)).toBeFalse();
+    expect(component.testSectionVisible).toBeFalse();
+    save$.next();
+    expect(values).toEqual([]);
+
+    component.loginConfigurationValue = 'login-1';
+    component.onLoginChange();
+
+    expect(validityOf(component)).toBeTrue();
+    expect(component.testSectionVisible).toBeTrue();
+  });
+
+  it('saves the selected login, and nothing of the 1.x login', () => {
+    const {save$, values} = withStoredReference('login-1');
+    component.formValueChange({...baseFormValue});
+
+    save$.next();
+
+    expect(values[0].authenticationPluginConfiguration).toBe('login-1');
+    expect(values[0].clientSecret).toBeUndefined();
+    expect(values[0].tenantId).toBeUndefined();
+    expect(values[0].clientId).toBeUndefined();
+  });
+
+  // ── The deprecated client-secret login of 1.x ──────────────────────────────────────────
+
+  const clientSecretLogin = {tenantId: '00000000-0000-0000-0000-000000000001', clientId: 'client-1'};
+
+  it('keeps a 1.x configuration valid and testable, without asking for the secret again', () => {
+    const {save$, values} = withStoredReference(undefined, [entraLogin], clientSecretLogin);
+    component.formValueChange({...baseFormValue, allowedSenders: 'noreply@gemeente.nl,ceo@gemeente.nl'});
+
+    expect(component.clientSecretLoginShown).toBeTrue();
+    expect(component.clientSecretStored).toBeTrue();
+    expect(validityOf(component)).toBeTrue();
+    expect(component.testSectionVisible).toBeTrue();
+
+    save$.next();
+
+    // Sent back unchanged: Valtimo overwrites the properties that are not secret with what is saved.
+    expect(values[0].tenantId).toBe(clientSecretLogin.tenantId);
+    expect(values[0].clientId).toBe('client-1');
+    expect(values[0].clientSecret).toBeUndefined();
+    expect(values[0].authenticationPluginConfiguration).toBe('');
+    expect(values[0].allowedSenders).toBe('noreply@gemeente.nl,ceo@gemeente.nl');
+  });
+
+  it('saves a changed secret of a 1.x configuration', () => {
+    const {save$, values} = withStoredReference(undefined, [entraLogin], clientSecretLogin);
+    component.formValueChange({...baseFormValue});
+    component.clientSecretValue = 'new-secret';
+    component.onLoginChange();
+
+    save$.next();
+
+    expect(values[0].clientSecret).toBe('new-secret');
+  });
+
+  it('lets a new configuration use the client secret, with all three filled in', () => {
+    const {save$, values} = withStoredReference(undefined);
+    component.formValueChange({...baseFormValue});
+    component.clientSecretTenantId = 'contoso.onmicrosoft.com';
+    component.clientSecretClientId = 'client-1';
+    component.onLoginChange();
+
+    expect(validityOf(component)).toBeFalse();
+
+    component.clientSecretValue = 'secret-1';
+    component.onLoginChange();
+
+    expect(validityOf(component)).toBeTrue();
+    save$.next();
+    expect(values[0].clientSecret).toBe('secret-1');
+  });
+
+  it('does not accept a secret of only whitespace for a new configuration', () => {
+    withStoredReference(undefined);
+    component.formValueChange({...baseFormValue});
+    component.clientSecretTenantId = 'contoso.onmicrosoft.com';
+    component.clientSecretClientId = 'client-1';
+    component.clientSecretValue = '   ';
+    component.onLoginChange();
+
+    expect(validityOf(component)).toBeFalse();
+  });
+
+  it('does not replace the stored secret of a 1.x configuration with whitespace', () => {
+    const {save$, values} = withStoredReference(undefined, [entraLogin], clientSecretLogin);
+    component.formValueChange({...baseFormValue});
+    component.clientSecretValue = '   ';
+    component.onLoginChange();
+
+    save$.next();
+
+    expect(values[0].clientSecret).toBeUndefined();
+  });
+
+  it('refuses a tenant ID that would change the token URL', () => {
+    withStoredReference(undefined, [entraLogin], {...clientSecretLogin, tenantId: 'tenant/../other'});
+    component.formValueChange({...baseFormValue});
+
+    expect(component.tenantIdInvalid).toBeTrue();
+    expect(validityOf(component)).toBeFalse();
+  });
+
+  it('migrates a 1.x configuration by selecting a login: the client-secret fields go, and are cleared', () => {
+    const {save$, values} = withStoredReference(undefined, [entraLogin], clientSecretLogin);
+    component.formValueChange({...baseFormValue});
+
+    component.loginConfigurationValue = 'login-1';
+    component.onLoginChange();
+
+    expect(component.clientSecretLoginShown).toBeFalse();
+    expect(validityOf(component)).toBeTrue();
+    save$.next();
+    expect(values[0].authenticationPluginConfiguration).toBe('login-1');
+    expect(values[0].tenantId).toBeUndefined();
+    expect(values[0].clientId).toBeUndefined();
+  });
+
+  it('keeps a 1.x configuration working when no Http Client Authentication configuration exists', () => {
+    withStoredReference(undefined, [], clientSecretLogin);
+    component.formValueChange({...baseFormValue});
+
+    expect(component.loginOptions).toEqual([]);
+    expect(validityOf(component)).toBeTrue();
+  });
+
+  it('changing the allowlist of a saved configuration needs no secret', () => {
+    const {save$, values} = withStoredReference('login-1');
+    component.formValueChange({...baseFormValue, allowedSenders: 'noreply@gemeente.nl,ceo@gemeente.nl'});
+
+    expect(validityOf(component)).toBeTrue();
+    save$.next();
+    expect(values[0].allowedSenders).toBe('noreply@gemeente.nl,ceo@gemeente.nl');
+  });
+
+  it('says why a configuration cannot log in to Microsoft, and blocks saving', () => {
+    const cases: Array<[object, string]> = [
+      [{authenticationType: 'BEARER'}, 'loginNotTokenExchange'],
+      [{...entraLogin.properties, audience: 'haal-centraal'}, 'loginHasAudience'],
+      [{...entraLogin.properties, scope: ' '}, 'loginWithoutScope'],
+    ];
+    cases.forEach(([properties, problem]) => {
+      withStoredReference('other', [loginWith('other', properties)]);
+      component.formValueChange({...baseFormValue});
+
+      expect(component.selectedLogin?.problem).withContext(problem).toBe(problem as any);
+      expect(validityOf(component)).withContext(problem).toBeFalse();
+      expect(component.testSectionVisible).withContext(problem).toBeFalse();
+    });
+  });
+
+  it('accepts a blank audience as no audience', () => {
+    withStoredReference('other', [loginWith('other', {...entraLogin.properties, audience: ''})]);
+    component.formValueChange({...baseFormValue});
+
+    expect(component.selectedLogin?.problem).toBeNull();
+    expect(validityOf(component)).toBeTrue();
+  });
+
+  it('offers nothing, without failing, when the configurations cannot be loaded', () => {
+    pluginManagementSpy.getPluginConfigurationsByCategory.and.returnValue(throwError(() => new Error('500')));
+    component = createComponent();
+    component.prefillConfiguration$ = of(undefined as any);
+    component.save$ = of();
+    component.ngOnInit();
+
+    expect(component.loginOptions).toEqual([]);
+    expect(component.loginConfigurationValue).toBe('');
+  });
+
+  it('keeps a stored reference that is not offered visible, and blocks saving until another is chosen', () => {
+    const {save$, values} = withStoredReference('gone');
+    component.formValueChange({...baseFormValue});
+
+    expect(component.unknownLoginConfiguration).toBe('gone');
+    expect(component.loginSelectionUnknown).toBeTrue();
+    expect(validityOf(component)).toBeFalse();
+    save$.next();
+    expect(values).toEqual([]);
+
+    component.loginConfigurationValue = 'login-1';
+    component.onLoginChange();
+
+    expect(component.loginSelectionUnknown).toBeFalse();
+    expect(validityOf(component)).toBeTrue();
+    save$.next();
+    expect(values[0].authenticationPluginConfiguration).toBe('login-1');
+  });
+
+  it('checks the selected login when the configurations arrive after the prefill', () => {
+    const options$ = new Subject<Array<any>>();
+    pluginManagementSpy.getPluginConfigurationsByCategory.and.returnValue(options$);
+    component = createComponent();
+    component.pluginId = 'entra';
+    component.prefillConfiguration$ = of({...baseFormValue, id: 'ccc', authenticationPluginConfiguration: 'other'} as any);
+    component.save$ = of();
+    component.ngOnInit();
+    component.formValueChange({...baseFormValue});
+
+    options$.next([loginWith('other', {...entraLogin.properties, audience: 'haal-centraal'})]);
+
+    expect(component.selectedLogin?.problem).toBe('loginHasAudience');
+    expect(validityOf(component)).toBeFalse();
+  });
+
+  it('marks a stored reference unknown when the configurations arrive after the prefill', () => {
+    const options$ = new Subject<Array<any>>();
+    pluginManagementSpy.getPluginConfigurationsByCategory.and.returnValue(options$);
+    component = createComponent();
+    component.pluginId = 'entra';
+    component.prefillConfiguration$ = of({...baseFormValue, id: 'ccc', authenticationPluginConfiguration: 'gone'} as any);
+    component.save$ = of();
+    component.ngOnInit();
+    component.formValueChange({...baseFormValue});
+
+    options$.next([entraLogin]);
+
+    expect(component.unknownLoginConfiguration).toBe('gone');
+    expect(validityOf(component)).toBeFalse();
+  });
+
+  it('forgets the saved id of the previous configuration while the next one is being resolved', () => {
+    // Otherwise a test mail sent meanwhile would use the configuration the admin left.
+    pluginManagementSpy.getPluginConfigurationsByCategory.and.returnValue(of([entraLogin]));
+    httpSpy.get.and.returnValue(new Subject<any[]>());
+    const prefill$ = new Subject<GraphMailPluginConfig>();
+    component = createComponent();
+    component.pluginId = 'entra';
+    component.prefillConfiguration$ = prefill$;
+    component.save$ = of();
+    component.ngOnInit();
+
+    prefill$.next({...baseFormValue, id: 'aaa', authenticationPluginConfiguration: 'login-1'} as any);
+    expect(component.savedConfigurationId).toBe('aaa');
+    prefill$.next({...baseFormValue, configurationTitle: 'B', authenticationPluginConfiguration: 'login-1'} as any);
+
+    expect(component.savedConfigurationId).toBeNull();
+  });
+
+  it('a second prefill replaces the state of the first', () => {
+    // Valtimo reuses the screen when the admin opens another configuration: what was read from the
+    // first must not be saved onto the second.
+    pluginManagementSpy.getPluginConfigurationsByCategory.and.returnValue(of([entraLogin]));
+    const prefill$ = new Subject<GraphMailPluginConfig>();
+    component = createComponent();
+    component.pluginId = 'entra';
+    component.prefillConfiguration$ = prefill$;
+    component.save$ = of();
+    component.ngOnInit();
+
+    prefill$.next({...baseFormValue, id: 'aaa', authenticationPluginConfiguration: 'login-1', testSenderMailbox: 'a@gemeente.nl'} as any);
+    component.testStatus = {success: true, message: 'sent with A', statusCode: 202};
+    component.configurationAmbiguous = true;
+    prefill$.next({...baseFormValue, id: 'bbb', authenticationPluginConfiguration: 'gone'} as any);
+
+    expect(component.testStatus).toBeNull();
+    expect(component.configurationAmbiguous).toBeFalse();
+
+    expect(component.savedConfigurationId).toBe('bbb');
+    expect(component.loginConfigurationValue).toBe('gone');
+    expect(component.unknownLoginConfiguration).toBe('gone');
+    expect(component.testSenderMailbox).toBe('');
+  });
+
+  // ── What the screen shows ───────────────────────────────────────────────────────────────
+
+  describe('template', () => {
+    // Renders the login select and its messages; v-form and v-input are left out (custom elements), and
+    // translations come back as their keys.
+    const render = async (
+      reference: string,
+      configurations: Array<any> | Observable<Array<any>>,
+      disabled = false,
+    ): Promise<{element: HTMLElement; fixture: any}> => {
+      pluginManagementSpy.getPluginConfigurationsByCategory.and.returnValue(
+        Array.isArray(configurations) ? of(configurations) : configurations,
+      );
+      httpSpy.get.and.returnValue(of([]));
+      await TestBed.configureTestingModule({
+        imports: [GraphMailPluginConfigurationComponent],
+        providers: [
+          {provide: HttpClient, useValue: httpSpy},
+          {provide: ConfigService, useValue: configServiceStub},
+          {provide: PluginManagementService, useValue: pluginManagementSpy},
+          {provide: PluginTranslationService, useValue: {translate: (key: string) => of(key)}},
+        ],
+      })
+        .overrideComponent(GraphMailPluginConfigurationComponent, {
+          set: {imports: [CommonModule, FormsModule, PluginTranslatePipeModule], schemas: [CUSTOM_ELEMENTS_SCHEMA]},
+        })
+        .compileComponents();
+      const fixture = TestBed.createComponent(GraphMailPluginConfigurationComponent);
+      fixture.componentInstance.pluginId = 'entra';
+      fixture.componentInstance.disabled$ = of(disabled);
+      fixture.componentInstance.save$ = of();
+      fixture.componentInstance.prefillConfiguration$ = of(
+        {...baseFormValue, id: 'ccc', authenticationPluginConfiguration: reference} as any,
+      );
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      return {element: fixture.nativeElement as HTMLElement, fixture};
+    };
+
+    it('offers a stored reference that is not in the list as an unknown configuration', async () => {
+      const {element} = await render('gone', [entraLogin]);
+
+      const options = Array.from(element.querySelectorAll('option')).map(option => option.textContent ?? '');
+      expect(options.some(text => text.includes('authenticationPluginConfigurationUnknown') && text.includes('gone')))
+        .withContext(options.join(' | '))
+        .toBeTrue();
+      expect(element.textContent).toContain('authenticationPluginConfigurationMissing');
+    });
+
+    it('says so when there are no Http Client Authentication configurations', async () => {
+      const {element} = await render('', []);
+
+      expect(element.textContent).toContain('authenticationPluginConfigurationNone');
+    });
+
+    it('keeps the select disabled until the configurations are loaded', async () => {
+      const configurations$ = new Subject<Array<any>>();
+      const {element, fixture} = await render('login-1', configurations$);
+      const select = element.querySelector('select') as HTMLSelectElement;
+      expect(select.disabled).toBeTrue();
+
+      configurations$.next([entraLogin]);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      expect(select.disabled).toBeFalse();
+    });
+
+    it('disables the select when the form is disabled', async () => {
+      const {element} = await render('login-1', [entraLogin], true);
+
+      expect((element.querySelector('select') as HTMLSelectElement).disabled).toBeTrue();
+    });
+
+    it('says under the select what to change in the selected configuration', async () => {
+      const {element} = await render('other', [loginWith('other', {...entraLogin.properties, audience: 'haal-centraal'})]);
+
+      expect(element.textContent).toContain('"other": loginHasAudience');
     });
   });
 });

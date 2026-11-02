@@ -76,6 +76,11 @@ import {TranslateLoader, TranslateModule} from "@ngx-translate/core";
 import {environment} from "../environments/environment";
 
 import {GraphMailPluginModule, graphMailPluginSpecification} from "@valtimo-plugins/graph-mail";
+// The login to (the dummy) Microsoft, with the certificates for the sandbox mTLS gateway (see backend/app/imports/mtls-gateway)
+import {
+  HttpClientAuthenticationPluginModule,
+  httpClientAuthenticationPluginSpecification,
+} from "@valtimo-plugins/http-client-authentication";
 
 export function tabsFactory() {
   return new Map<string, object>([
@@ -125,6 +130,7 @@ export function tabsFactory() {
     ReactiveFormsModule,
     ResourceModule,
     GraphMailPluginModule,
+    HttpClientAuthenticationPluginModule,
     SecurityModule,
     SseModule,
     SwaggerModule,
@@ -146,6 +152,7 @@ export function tabsFactory() {
       provide: PLUGINS_TOKEN,
       useValue: [
         graphMailPluginSpecification,
+        httpClientAuthenticationPluginSpecification,
       ],
     },
   ],

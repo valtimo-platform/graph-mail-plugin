@@ -26,8 +26,9 @@ class GraphMailHttpPropertiesTest {
     }
 
     @Test fun `a foreign token endpoint is rejected`() {
-        // This is the exfiltration path the allowlist exists for: the client secret is POSTed to
-        // tokenBaseUrl as a form field, so a host outside the allowlist means handing it over.
+        // This is the exfiltration path the allowlist exists for: the deprecated client-secret login
+        // POSTs the client secret to tokenBaseUrl as a form field, so a host outside the allowlist
+        // means handing it over.
         val ex =
             assertThrows(IllegalArgumentException::class.java) {
                 GraphMailHttpProperties(tokenBaseUrl = "https://attacker.example")
@@ -43,6 +44,9 @@ class GraphMailHttpPropertiesTest {
 
     @Test fun `plain http is rejected even on an allowed host`() {
         assertThrows(IllegalArgumentException::class.java) {
+            GraphMailHttpProperties(graphBaseUrl = "http://graph.microsoft.com")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
             GraphMailHttpProperties(tokenBaseUrl = "http://login.microsoftonline.com")
         }
     }
@@ -56,7 +60,6 @@ class GraphMailHttpPropertiesTest {
     @Test fun `the test escape hatch allows a local endpoint and reports it as non-production`() {
         val properties =
             GraphMailHttpProperties(
-                tokenBaseUrl = "http://localhost:8089",
                 graphBaseUrl = "http://localhost:8089",
                 allowNonMicrosoftEndpoints = true,
             )
@@ -87,12 +90,10 @@ class GraphMailHttpPropertiesTest {
     @Test fun `a sovereign cloud has upload hosts of its own`() {
         val usGov =
             GraphMailHttpProperties(
-                tokenBaseUrl = "https://login.microsoftonline.us",
                 graphBaseUrl = "https://graph.microsoft.us",
             )
         val china =
             GraphMailHttpProperties(
-                tokenBaseUrl = "https://login.partner.microsoftonline.cn",
                 graphBaseUrl = "https://microsoftgraph.chinacloudapi.cn",
             )
         assertNotNull(usGov.uploadHostSuffixes())
@@ -103,7 +104,6 @@ class GraphMailHttpPropertiesTest {
         val commercial = GraphMailHttpProperties().uploadHostSuffixes()!!
         val usGov =
             GraphMailHttpProperties(
-                tokenBaseUrl = "https://login.microsoftonline.us",
                 graphBaseUrl = "https://graph.microsoft.us",
             ).uploadHostSuffixes()!!
 
@@ -119,12 +119,10 @@ class GraphMailHttpPropertiesTest {
     @Test fun `both US Gov Graph endpoints share one upload host set`() {
         val gcc =
             GraphMailHttpProperties(
-                tokenBaseUrl = "https://login.microsoftonline.us",
                 graphBaseUrl = "https://graph.microsoft.us",
             ).uploadHostSuffixes()
         val dod =
             GraphMailHttpProperties(
-                tokenBaseUrl = "https://login.microsoftonline.us",
                 graphBaseUrl = "https://dod-graph.microsoft.us",
             ).uploadHostSuffixes()
         assertEquals(gcc, dod)
@@ -135,13 +133,7 @@ class GraphMailHttpPropertiesTest {
         // "evilsharepoint.com" would satisfy a ".sharepoint.com" entry written as "sharepoint.com".
         listOf("https://graph.microsoft.com", "https://graph.microsoft.us", "https://microsoftgraph.chinacloudapi.cn")
             .forEach { graph ->
-                val token =
-                    when {
-                        graph.endsWith(".us") -> "https://login.microsoftonline.us"
-                        graph.endsWith(".cn") -> "https://login.partner.microsoftonline.cn"
-                        else -> "https://login.microsoftonline.com"
-                    }
-                GraphMailHttpProperties(tokenBaseUrl = token, graphBaseUrl = graph)
+                GraphMailHttpProperties(graphBaseUrl = graph)
                     .uploadHostSuffixes()!!
                     .forEach { assertTrue(it.startsWith("."), "suffix '$it' for $graph must start with a dot") }
             }
@@ -150,7 +142,6 @@ class GraphMailHttpPropertiesTest {
     @Test fun `a sandbox endpoint has no upload host set`() {
         val properties =
             GraphMailHttpProperties(
-                tokenBaseUrl = "http://localhost:8089",
                 graphBaseUrl = "http://localhost:8089",
                 allowNonMicrosoftEndpoints = true,
             )

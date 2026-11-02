@@ -38,9 +38,9 @@ class ResolvedAttachment(
     val sizeBytes: Long get() = rawBytes.size.toLong()
 }
 
-// Azure Entra app registration credentials for OAuth2 Client Credentials — grouped so
-// GraphMailClient callers pass one value instead of three positional strings repeated
-// across the interface, the implementation, and every internal retry/draft-flow method.
+// The 1.x login, deprecated: the Azure Entra app registration credentials for OAuth2 Client
+// Credentials that a Graph Mail configuration without an Http Client Authentication configuration
+// still logs in with. See GraphMailClientSecretLogin.
 data class GraphCredentials(
     val tenantId: String,
     val clientId: String,
@@ -52,9 +52,20 @@ data class GraphCredentials(
     override fun toString(): String = "GraphCredentials(tenantId=$tenantId, clientId=$clientId, clientSecret=***)"
 }
 
-// Everything needed to send one email via Graph, grouped for the same reason as
-// [GraphCredentials]. Optional recipient lists and saveToSentItems default so callers only
-// need to name the fields that matter for their call site.
+internal data class TokenResponse(
+    @JsonProperty("access_token") val accessToken: String,
+    @JsonProperty("token_type") val tokenType: String,
+    @JsonProperty("expires_in") val expiresIn: Int,
+) {
+    // Same reasoning as GraphCredentials.toString() — accessToken is a live, directly usable
+    // bearer credential for the token's full lifetime. Kotlin's generated toString() would
+    // print it in plaintext if this object ever reached a debug log line or a failed assertion.
+    override fun toString(): String = "TokenResponse(accessToken=***, tokenType=$tokenType, expiresIn=$expiresIn)"
+}
+
+// Everything needed to send one email via Graph, grouped so callers pass one value. Optional
+// recipient lists and saveToSentItems default so callers only need to name the fields that
+// matter for their call site.
 data class OutboundMail(
     val senderMailbox: String,
     val toRecipients: List<GraphRecipient>,
@@ -66,17 +77,6 @@ data class OutboundMail(
     val attachments: List<ResolvedAttachment> = emptyList(),
     val saveToSentItems: Boolean = true,
 )
-
-internal data class TokenResponse(
-    @JsonProperty("access_token") val accessToken: String,
-    @JsonProperty("token_type") val tokenType: String,
-    @JsonProperty("expires_in") val expiresIn: Int,
-) {
-    // Same reasoning as GraphCredentials.toString() — accessToken is a live, directly usable
-    // bearer credential for the token's full lifetime. Kotlin's generated toString() would
-    // print it in plaintext if this object ever reached a debug log line or a failed assertion.
-    override fun toString(): String = "TokenResponse(accessToken=***, tokenType=$tokenType, expiresIn=$expiresIn)"
-}
 
 data class SendMailRequest(
     @JsonProperty("message") val message: GraphMessage,

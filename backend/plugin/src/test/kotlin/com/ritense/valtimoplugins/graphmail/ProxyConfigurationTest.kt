@@ -6,8 +6,12 @@ import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.ProxySelector
 import java.net.URI
+import java.net.http.HttpClient
+import java.time.Duration
+import javax.net.ssl.SSLContext
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -30,6 +34,30 @@ class ProxyConfigurationTest {
                     "proxy fails at connect when this happens.",
             )
         }
+    }
+
+    @Test
+    fun `a client with certificates keeps the proxy, timeouts, protocol and redirect policy`() {
+        val sslContext =
+            SSLContext
+                .getInstance("TLS")
+                .apply { init(null, null, null) }
+        val properties =
+            GraphMailHttpProperties(proxyHost = "proxy.intern.example.nl", proxyPort = 8080, connectTimeoutSeconds = 7)
+
+        val client = GraphMailAutoConfiguration().graphHttpClient(properties, sslContext)
+
+        val selected =
+            client
+                .proxy()
+                .orElseThrow()
+                .select(graphUri)
+                .single()
+        assertEquals("proxy.intern.example.nl", (selected.address() as InetSocketAddress).hostString)
+        assertEquals(Duration.ofSeconds(7), client.connectTimeout().orElseThrow())
+        assertEquals(HttpClient.Version.HTTP_1_1, client.version())
+        assertEquals(HttpClient.Redirect.NEVER, client.followRedirects())
+        assertSame(sslContext, client.sslContext())
     }
 
     @Test

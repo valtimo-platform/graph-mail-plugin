@@ -2,6 +2,7 @@ val kotlinLoggingVersion: String by project
 val nettyResolverDnsNativeMacOsVersion: String by project
 
 val valtimoVersion: String by project
+val httpClientAuthenticationVersion: String by project
 
 dependencies {
     implementation(platform("com.ritense.valtimo:valtimo-dependency-versions:$valtimoVersion"))
@@ -18,6 +19,11 @@ dependencies {
     }
 
     implementation(project(":backend:plugin"))
+    // Graph Mail has it as compileOnly: an application that selects an Http Client Authentication
+    // configuration adds the plugin itself. The sandbox logs in through one (config/plugin).
+    implementation("com.ritense.valtimoplugins:http-client-authentication:$httpClientAuthenticationVersion") {
+        isTransitive = false
+    }
 }
 
 tasks.jar {

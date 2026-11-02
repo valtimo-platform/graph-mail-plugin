@@ -53,7 +53,7 @@ class GraphMailMetrics(
         }
     }
 
-    /** Publishes how many tokens the shared cache is holding. */
+    /** Publishes how many tokens the shared cache of the deprecated client-secret login is holding. */
     fun bindTokenCache(cache: GraphTokenCache) {
         val registry = registry ?: return
         registry.gauge("graph.mail.token.cache.size", cache) { it.size().toDouble() }

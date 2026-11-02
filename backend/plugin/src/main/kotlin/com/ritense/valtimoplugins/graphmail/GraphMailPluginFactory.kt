@@ -19,6 +19,7 @@ class GraphMailPluginFactory(
     private val sendIdempotencyGuard: SendIdempotencyGuard,
     private val attachmentConcurrencyLimiter: AttachmentConcurrencyLimiter,
     private val metrics: GraphMailMetrics,
+    private val login: GraphMailLogin,
 ) : PluginFactory<GraphMailPlugin>(pluginService) {
     override fun create(): GraphMailPlugin =
         GraphMailPlugin(
@@ -28,5 +29,6 @@ class GraphMailPluginFactory(
             sendIdempotencyGuard,
             attachmentConcurrencyLimiter,
             metrics,
+            login,
         )
 }

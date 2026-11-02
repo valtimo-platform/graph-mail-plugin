@@ -32,9 +32,9 @@ private const val DEFAULT_MAX_ENTRIES = 1_000
  * guarantee would require a durable, transactionally-independent store (e.g. a dedicated table
  * committed in its own transaction), which is a larger change than this in-memory guard.
  *
- * Registered as a single Spring bean (see [GraphMailAutoConfiguration]), for the same reason
- * [GraphTokenCache] is: Valtimo hydrates a fresh [GraphMailPlugin] per plugin action invocation,
- * so a guard owned by the plugin instance would never see the earlier attempt's marker.
+ * Registered as a single Spring bean (see [GraphMailAutoConfiguration]): Valtimo hydrates a fresh
+ * [GraphMailPlugin] per plugin action invocation, so a guard owned by the plugin instance would
+ * never see the earlier attempt's marker.
  */
 class SendIdempotencyGuard(
     // Where markers live. The default is in-memory and therefore per-JVM; see SentMarkerStore for
