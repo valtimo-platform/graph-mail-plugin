@@ -1,9 +1,9 @@
 package com.ritense.valtimoplugins.graphmail
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.ritense.plugin.repository.PluginConfigurationRepository
 import com.ritense.plugin.service.PluginService
 import com.ritense.resource.service.TemporaryResourceStorageService
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -50,7 +50,7 @@ class GraphMailAutoConfigurationTest {
             assertTrue(context.startupFailure == null, "context failed to start: ${context.startupFailure}")
             listOf(
                 GraphMailHttpProperties::class.java,
-                GraphTokenCache::class.java,
+                GraphMailLogin::class.java,
                 SendIdempotencyGuard::class.java,
                 AttachmentConcurrencyLimiter::class.java,
                 GraphMailClient::class.java,
@@ -58,6 +58,7 @@ class GraphMailAutoConfigurationTest {
                 GraphMailTestSendController::class.java,
                 GraphMailHttpSecurityConfigurer::class.java,
                 GraphMailEndpointAllowlistWarning::class.java,
+                GraphMailRemovedSettingWarning::class.java,
             ).forEach { type ->
                 assertTrue(context.getBeanNamesForType(type).isNotEmpty(), "missing bean: ${type.simpleName}")
             }
@@ -88,33 +89,6 @@ class GraphMailAutoConfigurationTest {
     }
 
     @Test
-    fun `the allowlist guard is on by default and can be switched off deliberately`() {
-        runner.run { context ->
-            assertTrue(
-                context.getBeanNamesForType(AllowedSendersChangeGuard::class.java).isNotEmpty(),
-                "the guard must be active without any configuration — it is deny-by-default",
-            )
-            assertTrue(
-                context.getBeanNamesForType(GraphMailGuardStartupCheck::class.java).isNotEmpty(),
-                "the startup check must be tied to the guard; the guard is worthless if it can " +
-                    "disappear silently",
-            )
-        }
-
-        runner.withPropertyValues("graph-mail.require-secret-for-allowlist-change=false").run { context ->
-            assertTrue(
-                context.getBeanNamesForType(AllowedSendersChangeGuard::class.java).isEmpty(),
-                "switching the guard off must actually remove it",
-            )
-            assertTrue(
-                context.getBeanNamesForType(GraphMailGuardStartupCheck::class.java).isEmpty(),
-                "with the guard gone there is nothing for the startup check to verify, and it " +
-                    "would fail the boot it exists to protect",
-            )
-        }
-    }
-
-    @Test
     fun `deployment settings reach the beans that use them`() {
         runner
             .withPropertyValues(
@@ -127,11 +101,34 @@ class GraphMailAutoConfigurationTest {
     }
 
     @Test
-    fun `an invalid endpoint fails the boot rather than being ignored`() {
+    fun `a token-base-url from 1x still works, and is still checked`() {
+        runner.withPropertyValues("graph-mail.http.token-base-url=https://login.microsoftonline.us").run { context ->
+            assertTrue(context.startupFailure == null, "context failed to start: ${context.startupFailure}")
+            assertEquals(
+                "https://login.microsoftonline.us",
+                context.getBean(GraphMailHttpProperties::class.java).tokenBaseUrl,
+            )
+        }
         runner.withPropertyValues("graph-mail.http.token-base-url=https://evil.example.com").run { context ->
+            assertNotNull(context.startupFailure, "the client secret must not be sent to a non-Microsoft host")
+        }
+    }
+
+    @Test
+    fun `the deprecated client-secret login is wired without the Http Client Authentication plugin's beans`() {
+        runner.run { context ->
+            assertNotNull(context.getBean(GraphMailClientSecretLogin::class.java))
+            assertNotNull(context.getBean(GraphTokenCache::class.java))
+            assertNotNull(context.getBean(GraphMailLogin::class.java))
+        }
+    }
+
+    @Test
+    fun `an invalid endpoint fails the boot rather than being ignored`() {
+        runner.withPropertyValues("graph-mail.http.graph-base-url=https://evil.example.com").run { context ->
             assertNotNull(
                 context.startupFailure,
-                "a non-Microsoft token endpoint must stop the application, not be quietly accepted",
+                "a non-Microsoft Graph endpoint must stop the application, not be quietly accepted",
             )
         }
     }
@@ -142,8 +139,6 @@ class GraphMailAutoConfigurationTest {
         @Bean fun objectMapper(): ObjectMapper = ObjectMapper()
 
         @Bean fun pluginService(): PluginService = mock()
-
-        @Bean fun pluginConfigurationRepository(): PluginConfigurationRepository = mock()
 
         @Bean fun temporaryResourceStorageService(): TemporaryResourceStorageService = mock()
     }

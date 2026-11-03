@@ -61,7 +61,7 @@ class InMemorySentMarkerStore(
 
     // sentAt only grows (one entry per distinct execution+activity that has ever sent). Once it
     // gets large, sweep out entries already past their TTL — mirrors the eviction pattern in
-    // GraphTokenCache / GraphMailTestSendController's rate-limit store.
+    // GraphMailTestSendController's rate-limit store.
     private fun evictStaleIfNeeded() {
         if (sentAt.size < maxEntries) return
         val now = Instant.now()

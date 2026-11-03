@@ -14,36 +14,6 @@
     ></v-input>
 
     <v-input
-      name="tenantId"
-      [title]="'tenantId' | pluginTranslate: pluginId | async"
-      [margin]="true"
-      [defaultValue]="obs.prefill?.tenantId"
-      [disabled]="obs.disabled"
-      [required]="true"
-    ></v-input>
-    <div
-      *ngIf="tenantIdInvalid"
-      style="margin: -10px 0 10px; font-size: 12px; color: #da1e28"
-    >
-      {{ 'tenantIdInvalidFormat' | pluginTranslate: pluginId | async }}
-    </div>
-
-    <v-input
-      name="clientId"
-      [title]="'clientId' | pluginTranslate: pluginId | async"
-      [margin]="true"
-      [defaultValue]="obs.prefill?.clientId"
-      [disabled]="obs.disabled"
-      [required]="true"
-    ></v-input>
-    <div
-      *ngIf="clientIdInvalid"
-      style="margin: -10px 0 10px; font-size: 12px; color: #da1e28"
-    >
-      {{ 'clientIdInvalidFormat' | pluginTranslate: pluginId | async }}
-    </div>
-
-    <v-input
       name="allowedSenders"
       [title]="'allowedSenders' | pluginTranslate: pluginId | async"
       [tooltip]="'allowedSendersTooltip' | pluginTranslate: pluginId | async"
@@ -61,31 +31,105 @@
 
   </v-form>
 
-  <!-- clientSecret outside v-form: native password input guarantees masking -->
+  <!-- The Http Client Authentication configuration to log in with. A native select: see loginConfigurationValue. -->
   <div style="margin-bottom: 16px">
-    <label style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin-bottom: 8px; letter-spacing: .16px">
-      {{ 'clientSecret' | pluginTranslate: pluginId | async }}
-    </label>
-    <input
-      type="password"
-      autocomplete="new-password"
-      [(ngModel)]="clientSecretValue"
-      (ngModelChange)="onSecretChange()"
-      [disabled]="!!obs.disabled"
-      [placeholder]="savedConfigurationId ? (('clientSecretPlaceholder' | pluginTranslate: pluginId | async) ?? '') : ''"
-      style="width: 100%; padding: 0 16px; border: none; border-bottom: 1px solid #8d8d8d;
-             background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box;
-             outline: none; font-family: inherit"
-    />
-    <div
-      *ngIf="secretRequiredForAllowlistChange"
-      style="margin: 8px 0 0; font-size: 12px; color: #da1e28"
+    <label
+      for="graph-mail-authentication-plugin-configuration"
+      style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin-bottom: 8px; letter-spacing: .16px"
     >
-      {{ 'allowedSendersChangeRequiresSecret' | pluginTranslate: pluginId | async }}
+      {{ 'authenticationPluginConfiguration' | pluginTranslate: pluginId | async }}
+    </label>
+    <select
+      id="graph-mail-authentication-plugin-configuration"
+      [(ngModel)]="loginConfigurationValue"
+      (ngModelChange)="onLoginChange()"
+      [disabled]="!!obs.disabled || !loginOptions"
+      style="width: 100%; padding: 0 16px; border: none; border-bottom: 1px solid #8d8d8d;
+             background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box; font-family: inherit"
+      [style.border-bottom]="loginSelectionUnknown || selectedLogin?.problem ? '2px solid #da1e28' : '1px solid #8d8d8d'"
+    >
+      <option value="">{{ 'authenticationPluginConfigurationEmpty' | pluginTranslate: pluginId | async }}</option>
+      <option *ngFor="let option of loginOptions ?? []" [value]="option.id">{{ option.title }}</option>
+      <option *ngIf="unknownLoginConfiguration" [value]="unknownLoginConfiguration">
+        {{ 'authenticationPluginConfigurationUnknown' | pluginTranslate: pluginId | async }} ({{ unknownLoginConfiguration }})
+      </option>
+    </select>
+    <div style="margin: 6px 0 0; font-size: 12px; color: #525252">
+      {{ 'authenticationPluginConfigurationTooltip' | pluginTranslate: pluginId | async }}
+    </div>
+    <div *ngIf="selectedLogin?.problem as problem" style="margin: 6px 0 0; font-size: 12px; color: #da1e28">
+      "{{ selectedLogin?.title }}": {{ problem | pluginTranslate: pluginId | async }}
+    </div>
+    <div *ngIf="loginSelectionUnknown" style="margin: 6px 0 0; font-size: 12px; color: #da1e28">
+      {{ 'authenticationPluginConfigurationMissing' | pluginTranslate: pluginId | async }}
+    </div>
+    <div
+      *ngIf="loginOptions && loginOptions.length === 0"
+      style="margin: 6px 0 0; font-size: 12px; color: #525252"
+    >
+      {{ 'authenticationPluginConfigurationNone' | pluginTranslate: pluginId | async }}
     </div>
   </div>
 
-  <!-- ── Testmail (zichtbaar zodra Tenant ID + Client ID + Client Secret zijn ingevuld) ── -->
+  <!-- The deprecated client-secret login of 1.x: only while no Http Client Authentication configuration is selected.
+       Native inputs, as the selection above; see clientSecretTenantId. -->
+  <div
+    *ngIf="clientSecretLoginShown"
+    style="margin-bottom: 16px; border-left: 3px solid #f1c21b; padding: 4px 0 4px 14px"
+  >
+    <strong style="display: block; font-size: 13px; margin-bottom: 4px">
+      {{ 'clientSecretLogin' | pluginTranslate: pluginId | async }}
+    </strong>
+    <p style="margin: 0 0 12px; font-size: 12px; color: #525252; line-height: 1.5">
+      {{ 'clientSecretLoginDeprecated' | pluginTranslate: pluginId | async }}
+    </p>
+
+    <label for="graph-mail-tenant-id" style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin-bottom: 8px; letter-spacing: .16px">
+      {{ 'tenantId' | pluginTranslate: pluginId | async }}
+    </label>
+    <input
+      id="graph-mail-tenant-id"
+      type="text"
+      [(ngModel)]="clientSecretTenantId"
+      (ngModelChange)="onLoginChange()"
+      [disabled]="!!obs.disabled"
+      style="width: 100%; padding: 0 16px; border: none; border-bottom: 1px solid #8d8d8d;
+             background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box; font-family: inherit; margin-bottom: 4px"
+    />
+    <div *ngIf="tenantIdInvalid" style="margin: 0 0 8px; font-size: 12px; color: #da1e28">
+      {{ 'tenantIdInvalidFormat' | pluginTranslate: pluginId | async }}
+    </div>
+
+    <label for="graph-mail-client-id" style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin: 12px 0 8px; letter-spacing: .16px">
+      {{ 'clientId' | pluginTranslate: pluginId | async }}
+    </label>
+    <input
+      id="graph-mail-client-id"
+      type="text"
+      [(ngModel)]="clientSecretClientId"
+      (ngModelChange)="onLoginChange()"
+      [disabled]="!!obs.disabled"
+      style="width: 100%; padding: 0 16px; border: none; border-bottom: 1px solid #8d8d8d;
+             background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box; font-family: inherit"
+    />
+
+    <label for="graph-mail-client-secret" style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin: 12px 0 8px; letter-spacing: .16px">
+      {{ 'clientSecret' | pluginTranslate: pluginId | async }}
+    </label>
+    <input
+      id="graph-mail-client-secret"
+      type="password"
+      autocomplete="new-password"
+      [(ngModel)]="clientSecretValue"
+      (ngModelChange)="onLoginChange()"
+      [disabled]="!!obs.disabled"
+      [placeholder]="clientSecretStored ? (('clientSecretPlaceholder' | pluginTranslate: pluginId | async) ?? '') : ''"
+      style="width: 100%; padding: 0 16px; border: none; border-bottom: 1px solid #8d8d8d;
+             background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box; font-family: inherit"
+    />
+  </div>
+
+  <!-- ── Testmail (zichtbaar zodra er een bruikbare login is: een Http Client Authentication-configuratie of het client secret) ── -->
   <div
     *ngIf="testSectionVisible"
     style="margin-top: 28px; border: 1px solid #e0e0e0; border-radius: 6px; padding: 18px 20px"

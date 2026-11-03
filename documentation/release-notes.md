@@ -2,6 +2,12 @@
 
 Overzicht van wijzigingen per versie van de Graph Mail-plugin.
 
+## 1.1.0
+
+Graph Mail kan zich bij Microsoft aanmelden via een configuratie van de plugin
+[Http Client Authentication](https://github.com/generiekzaakafhandelcomponent/http-client-authentication-plugin/blob/main/documentation/release-notes.md).
+Client ID, secret en eventuele certificaten (mTLS, voor een gateway met clientcertificaat) beheer je zo op één plek.
+
 ## 1.0.5
 
 Ondersteuning voor Valtimo 13.48.0.

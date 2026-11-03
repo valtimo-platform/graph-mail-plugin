@@ -29,6 +29,7 @@ val valtimoVersion: String by project
 val operatonVersion: String by project
 val jsoupVersion: String by project
 val wiremockVersion: String by project
+val httpClientAuthenticationVersion: String by project
 
 configurations.testRuntimeClasspath {
     resolutionStrategy.force("org.wiremock:wiremock:$wiremockVersion")
@@ -45,14 +46,6 @@ dependencies {
     compileOnly("io.github.oshai:kotlin-logging:$kotlinLoggingVersion")
     compileOnly("com.ritense.valtimo:temporary-resource-storage")
     compileOnly("org.springframework.boot:spring-boot-starter-security")
-    // AllowedSendersChangeGuard is an @Aspect that reads the stored configuration through
-    // PluginConfigurationRepository, which extends JpaRepository. compileOnly like the rest of the
-    // Spring/Valtimo dependencies here — the host application supplies these at runtime.
-    //
-    // The repository rather than PluginService on purpose: the aspect advises PluginService, so
-    // injecting it would create a circular dependency between an advisor and its own target.
-    compileOnly("org.springframework.boot:spring-boot-starter-aop")
-    compileOnly("org.springframework.boot:spring-boot-starter-data-jpa")
     // jsoupVersion is 1.23.1, which fixes CVE-2026-71497 (Cleaner XSS bypass via a malformed tag
     // name ending in a control character, for custom Safelists that permit raw-text elements).
     // EMAIL_HTML_SAFELIST in GraphMailPlugin.kt adds no raw-text elements, so this plugin's usage
@@ -63,6 +56,15 @@ dependencies {
     // application that has no Micrometer on the classpath. GZAC ships Actuator, so in practice the
     // meters are there — but the plugin must not be the reason a leaner host application fails.
     compileOnly("io.micrometer:micrometer-core")
+    // The Microsoft login and the client certificate come from an Http Client Authentication
+    // configuration (GraphMailLogin). compileOnly on purpose, so upgrading Graph Mail never adds that
+    // plugin to an application, or changes the version of one it already has (other plugins may
+    // depend on it, and a second library with its plugin key stops the application from starting).
+    // An application that selects one adds it itself; configurations with the deprecated client-secret
+    // login don't need it. GraphMailLogin checks at runtime that it is there and new enough.
+    compileOnly("com.ritense.valtimoplugins:http-client-authentication:$httpClientAuthenticationVersion") {
+        isTransitive = false
+    }
 
     // Testing
     testImplementation("com.ritense.valtimo:plugin-valtimo")
@@ -76,7 +78,6 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-web")
     testImplementation("org.springframework.boot:spring-boot-starter-data-jpa")
     testImplementation("org.springframework.boot:spring-boot-starter-security")
-    testImplementation("org.springframework.boot:spring-boot-starter-aop")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("org.mockito:mockito-core")
@@ -88,6 +89,16 @@ dependencies {
     // assumption the duplicate guard is built on. No Postgres, no docker, no Spring.
     testImplementation("com.h2database:h2")
     testImplementation("io.micrometer:micrometer-core")
+    testImplementation("com.ritense.valtimoplugins:http-client-authentication:$httpClientAuthenticationVersion") {
+        isTransitive = false
+    }
 }
+
+// The mTLS tests reject a client certificate with WireMock (Jetty), which may close the connection
+// before the client has read its alert. With TLS 1.3 the client may then already have sent the
+// request, and a send ends as an unknown outcome; with TLS 1.2 it ends as a retried network failure,
+// which the tests allow (see GraphMailClientMtlsTest.rejectedInTls). Jetty sets its own server
+// protocols, so the JDK client of the test JVM is limited instead; no other test uses TLS.
+tasks.test { systemProperty("jdk.tls.client.protocols", "TLSv1.2") }
 
 apply(from = "gradle/publishing.gradle")

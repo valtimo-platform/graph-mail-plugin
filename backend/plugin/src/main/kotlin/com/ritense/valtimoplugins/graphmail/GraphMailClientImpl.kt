@@ -3,22 +3,20 @@ package com.ritense.valtimoplugins.graphmail
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
-import org.springframework.util.LinkedMultiValueMap
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.RestClientException
 import org.springframework.web.util.UriComponentsBuilder
 import java.net.URI
-import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Base64
 import java.util.UUID
+import javax.net.ssl.SSLContext
 import kotlin.random.Random
 
-private const val TOKEN_EXPIRY_BUFFER_SECONDS = 60L
 private const val MAX_RETRIES = 5
 private const val INITIAL_BACKOFF_MS = 500L
 private const val BACKOFF_MULTIPLIER = 2.0
@@ -41,7 +39,6 @@ private const val MAX_IN_CALL_WAIT_MS = 2_000L
 
 // Retry-After values above this are not worth waiting for in-call — hand back to the engine instead.
 private const val MAX_RETRY_AFTER_SECONDS = 15L
-private const val TOKEN_MAX_RETRIES = 3
 
 // Wall-clock ceiling for one attempt, sleeps included. Still needed as a backstop: a request that
 // hangs just under the read timeout can outlast the wait budget on its own.
@@ -55,9 +52,6 @@ private const val CHUNK_MAX_RETRIES = 3
 // How many consecutive server responses may decline to advance the upload before giving up.
 // Graph is allowed to ask us to go back and re-send a range; it is not allowed to do so forever.
 private const val MAX_UPLOAD_STALLS = 3
-
-// Bound the cause-chain walk; a self-referential chain would otherwise hang the classifier.
-private const val MAX_CAUSE_DEPTH = 10
 
 // 4xx statuses that no amount of retrying will change: they need a configuration, permission or
 // input fix first. Everything else in the 4xx range is treated as possibly transient so the job
@@ -88,23 +82,32 @@ private const val REQUEST_ID_HEADER = "request-id"
  *
  * Not thread-safe, and does not need to be: one instance belongs to one call.
  */
-private class WaitBudget(
+internal class WaitBudget(
     private val totalMs: Long = MAX_IN_CALL_WAIT_MS,
 ) {
     private var spentMs = 0L
 
-    /** Sleeps for [requestedMs], or throws if that would exhaust the budget. */
+    /**
+     * Sleeps for [requestedMs], or throws if that would exhaust the budget. [lastFailure] is the
+     * failure being backed off from, when its message is safe to show (a network error, a failed
+     * login): it rides along, so the hand-back still says what failed (e.g. which certificates were
+     * used), with its status. Not a raw HTTP error, whose message carries the response body.
+     */
     fun sleepOrHandBack(
         requestedMs: Long,
         what: String,
+        lastFailure: Throwable? = null,
     ) {
         if (requestedMs <= 0) return
         if (spentMs + requestedMs > totalMs) {
+            val detail = lastFailure?.let { " Last failure: ${maskEmailsInText(it.message)}" }.orEmpty()
             throw GraphMailRetryableException(
                 "$what would need ${requestedMs}ms more waiting and this call has already waited " +
                     "${spentMs}ms of its ${totalMs}ms budget. Handing back to the job executor " +
                     "rather than holding its thread — configure a failedJobRetryTimeCycle on the " +
-                    "service task so the retry is spread out.",
+                    "service task so the retry is spread out.$detail",
+                lastFailure,
+                statusCode = (lastFailure as? GraphMailException)?.statusCode ?: 503,
             )
         }
         spentMs += requestedMs
@@ -127,18 +130,17 @@ private class WaitBudget(
 /**
  * Implementation of [GraphMailClient].
  *
- * - OAuth2 Client Credentials, per-(tenantId+clientId) cache via the shared [GraphTokenCache]
- *   (see that class for why the cache must be injected rather than owned by this instance)
- * - Exponential backoff with jitter on send (5 attempts) and on token fetch (3)
+ * - The login per request from [GraphMailAuthentication] (the Http Client Authentication plugin caches the token);
+ *   a login that may clear by itself is retried like a network error
+ * - With certificates, a client per [SSLContext] whose gateway rejections are reported by [CertificateRejectionInterceptor]
+ * - Exponential backoff with jitter on send (5 attempts)
  * - 429 honours Retry-After (capped at 15s to limit job-executor thread blocking)
- * - 401 invalidates only the affected key, then retries exactly once
+ * - 401 is retried once with a fresh token when the login can fetch one (client secret), otherwise permanent
  * - PII-aware logging (mailbox + recipients are masked)
  */
 class GraphMailClientImpl(
     private val restClient: RestClient,
-    private val tokenBaseUrl: String = "https://login.microsoftonline.com",
     private val graphBaseUrl: String = "https://graph.microsoft.com",
-    private val tokenCache: GraphTokenCache = GraphTokenCache(),
     // Host suffixes an upload URL may live on, for the cloud graphBaseUrl points at (see
     // GraphMailHttpProperties.uploadHostSuffixes). Null only for a WireMock or sandbox endpoint,
     // which legitimately returns its own host; that case is pinned to exactly graphBaseUrl's host.
@@ -148,279 +150,44 @@ class GraphMailClientImpl(
     // it was handed. Carrying the cloud's own set instead also keeps the clouds apart: a US Gov
     // deployment no longer accepts a commercial upload host, which the boolean allowed.
     private val uploadHostSuffixes: Set<String>? = null,
+    // Builds the client for a set of certificates.
+    private val certificateRestClients: (SSLContext) -> RestClient,
 ) : GraphMailClient {
     private val logger = LoggerFactory.getLogger(GraphMailClientImpl::class.java)
 
-    // The client-credentials scope has to name the cloud instance the token will be used against.
-    // Hard-coding the commercial "https://graph.microsoft.com/.default" meant a US Gov or China
-    // tenant — both of which the endpoint allowlist accepts — would ask Entra for a resource that
-    // does not exist in its cloud and fail every send at the token step. Derive it from the Graph
-    // endpoint actually in use instead.
-    private val graphScope: String = "${graphBaseUrl.trimEnd('/')}/.default"
-
-    // A hash of clientSecret is part of the cache key — not just tenantId+clientId — so a
-    // plugin configuration with a wrong or stale secret can never ride on a token that a
-    // *different* (correct) secret already fetched and cached for the same tenant/client.
-    // Without this, tenantId+clientId (not marked `secret` on the plugin property, so visible
-    // in the admin UI) would be enough to obtain a working token via the shared cache without
-    // Azure Entra ever validating the caller's actual secret.
-    private fun cachePrefix(
-        tenantId: String,
-        clientId: String,
-    ) = "$tenantId:$clientId:"
-
-    private fun cacheKey(
-        tenantId: String,
-        clientId: String,
-        clientSecret: String,
-    ) = "${cachePrefix(tenantId, clientId)}${sha256(clientSecret)}"
-
-    private fun sha256(value: String): String =
-        MessageDigest
-            .getInstance("SHA-256")
-            .digest(value.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-
-    private fun cacheKeyFor(credentials: GraphCredentials) =
-        cacheKey(credentials.tenantId, credentials.clientId, credentials.clientSecret)
-
-    // `deadline` is the send operation's wall-clock budget. Passing it down matters: without it the
-    // token retry loop runs its own wait cycle *inside* the send loop, and the
-    // send's "hard" cap silently becomes cap + token-retry time.
-    internal fun getAccessToken(
-        credentials: GraphCredentials,
-        deadline: Long? = null,
-    ): String {
-        requireCredentials(credentials)
-        return tokenCache.getOrFetch(cacheKeyFor(credentials)) { fetchToken(credentials, deadline) }
-    }
-
-    // Bypasses the cache entirely. Used only by the 401 handler — see the comment at that call site
-    // for why re-reading the cache after an invalidation is not enough.
-    private fun forceFreshAccessToken(
-        credentials: GraphCredentials,
-        deadline: Long?,
-    ): String {
-        requireCredentials(credentials)
-        return tokenCache.forceFetch(cacheKeyFor(credentials)) { fetchToken(credentials, deadline) }
-    }
-
-    private fun requireCredentials(credentials: GraphCredentials) {
-        // Re-checked here as well as in GraphMailPlugin: the test-send endpoint reaches this class
-        // through a different path, and a bad tenantId should fail the same way on both.
-        require(isValidTenantId(credentials.tenantId)) {
-            "tenantId is not a usable tenant identifier — expected a directory GUID, a verified " +
-                "domain, or 'common' / 'organizations'"
-        }
-        require(credentials.clientId.isNotBlank()) { "clientId must not be blank" }
-        require(credentials.clientSecret.isNotBlank()) { "clientSecret must not be blank" }
-    }
-
-    override fun invalidateCache(
-        tenantId: String?,
-        clientId: String?,
-    ) {
-        when {
-            tenantId != null && clientId != null -> {
-                // The secret isn't known here (this is the public invalidate-by-selector API),
-                // so drop every cached entry for this tenant/client regardless of which secret
-                // variant fetched it.
-                val removed = tokenCache.invalidateByPrefix(cachePrefix(tenantId, clientId))
-                if (removed > 0) logger.warn("Token cache cleared ({} entries) for [{}:***]", removed, tenantId)
-            }
-            tenantId == null && clientId == null -> {
-                val count = tokenCache.invalidateAll()
-                logger.warn("Token cache fully cleared ({} entries)", count)
-            }
-            else ->
-                logger.warn(
-                    "invalidateCache called with partial selector — ignored (tenantId={}, clientId={})",
-                    tenantId != null,
-                    clientId != null,
-                )
-        }
-    }
-
-    private fun fetchToken(
-        credentials: GraphCredentials,
-        deadline: Long? = null,
-    ): Pair<String, Instant> {
-        val (tenantId, clientId, clientSecret) = credentials
-        // encode() before expand() percent-encodes the substituted value, so a tenantId carrying a
-        // structural character can no longer add a path segment or start a query string. The host
-        // is pinned by the endpoint allowlist either way, so this is defence in depth rather than
-        // a way out of the tenant — but it costs nothing and the plugin already validates every
-        // other externally-supplied string this way.
-        val url =
-            UriComponentsBuilder
-                .fromUriString("$tokenBaseUrl/{tenantId}/oauth2/v2.0/token")
-                .encode()
+    // The client for this send: the shared one, or one with the certificates of the login. The interceptor reports a
+    // gateway's rejection of the certificates before any retry logic here sees it, so every request path is covered
+    // and nothing else in this class depends on certificates.
+    private fun forAuthentication(authentication: GraphMailAuthentication): GraphMailClientImpl {
+        val sslContext = authentication.sslContext ?: return this
+        val certificateClient =
+            certificateRestClients(sslContext)
+                .mutate()
+                .requestInterceptor(CertificateRejectionInterceptor(authentication.source, graphBaseUrl))
                 .build()
-                .expand(tenantId)
-                .toUriString()
-
-        val form =
-            LinkedMultiValueMap<String, String>().apply {
-                add("grant_type", "client_credentials")
-                add("client_id", clientId)
-                add("client_secret", clientSecret)
-                add("scope", graphScope)
-            }
-
-        val response = postTokenWithRetry(url, form, tenantId, deadline)
-
-        // Guard against negative TTL if Azure returns expires_in < buffer.
-        val ttl = (response.expiresIn.toLong() - TOKEN_EXPIRY_BUFFER_SECONDS).coerceAtLeast(0L)
-        val expiresAt = Instant.now().plusSeconds(ttl)
-
-        logger.info("New token acquired [{}:***] — valid for {}s", tenantId, ttl)
-        return response.accessToken to expiresAt
+        return GraphMailClientImpl(certificateClient, graphBaseUrl, uploadHostSuffixes, certificateRestClients)
     }
 
-    // Jitter widens as backoffMs grows; divisor controls how wide (backoffMs / divisor).
-    // Token requests use a wider jitter band (divisor 2) than Graph API calls (divisor 5) —
-    // preserved from the pre-existing tuning, not changed by this refactor.
-    // Never sleep past the operation's deadline; a null deadline means "no budget attached".
-    private fun boundedByDeadline(
-        delayMs: Long,
-        deadline: Long?,
-    ): Long = if (deadline == null) delayMs else delayMs.coerceAtMost(deadline - System.currentTimeMillis())
-
-    private fun jitteredBackoff(
-        backoffMs: Long,
-        divisor: Long,
-    ): Long = backoffMs + Random.nextLong(0, (backoffMs / divisor).coerceAtLeast(1))
-
-    private fun postTokenWithRetry(
-        url: String,
-        form: LinkedMultiValueMap<String, String>,
-        tenantId: String,
-        deadline: Long?,
-    ): TokenResponse {
-        var attempt = 0
-        var backoffMs = INITIAL_BACKOFF_MS
-        val waitBudget = WaitBudget()
-        while (true) {
-            if (deadline != null && System.currentTimeMillis() > deadline) {
-                throw GraphMailRetryableException(
-                    "Timed out acquiring an access token for tenant [$tenantId] before the send deadline",
-                )
-            }
-            attempt++
-            try {
-                return restClient
-                    .post()
-                    .uri(url)
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body(form)
-                    .retrieve()
-                    .body(TokenResponse::class.java)
-                    ?: throw GraphMailException("Empty response when fetching access token")
-            } catch (ex: HttpClientErrorException) {
-                // Entra throttles (429) and times out (408) like any other service. Treating those
-                // as "check your Client ID and Secret" sends an administrator hunting a credential
-                // problem that does not exist, and burns the send on a condition that clears itself.
-                val status = ex.statusCode.value()
-                if (status == 429 || status == 408) {
-                    if (attempt >= TOKEN_MAX_RETRIES) {
-                        throw GraphMailRetryableException(
-                            "Azure Entra throttled the token request ($status) after $attempt attempts",
-                            ex,
-                            statusCode = status,
-                        )
-                    }
-                    val wait =
-                        boundedByDeadline(
-                            parseRetryAfter(ex.responseHeaders?.getFirst("Retry-After"))
-                                .coerceAtMost(MAX_RETRY_AFTER_SECONDS) * 1000,
-                            deadline,
-                        )
-                    logger.warn(
-                        "Token request {} for tenant [{}] — attempt {}/{}, waiting {}ms",
-                        status,
-                        tenantId,
-                        attempt,
-                        TOKEN_MAX_RETRIES,
-                        wait,
-                    )
-                    waitBudget.sleepOrHandBack(wait, "Retrying the token request after $status")
-                    continue
-                }
-                logger.error("Token request rejected ({}) for tenant [{}]", ex.statusCode, tenantId)
-                // Do NOT log ex.responseBodyAsString — Azure token responses may echo back the
-                // client_secret. The HTTP status (logged above) is sufficient for diagnosis.
-                throw GraphMailPermanentException(
-                    "Azure rejected token request (${ex.statusCode}) — check tenantId, clientId and " +
-                        "clientSecret of this plugin configuration, and that the app registration is " +
-                        "not expired or disabled",
-                    ex,
-                    statusCode = ex.statusCode.value(),
-                )
-            } catch (ex: HttpServerErrorException) {
-                if (attempt >= TOKEN_MAX_RETRIES) {
-                    logger.error("Azure Entra unavailable ({}) after {} token attempts", ex.statusCode, attempt)
-                    throw GraphMailRetryableException(
-                        "Azure Entra unavailable (${ex.statusCode}) after $attempt token attempts",
-                        ex,
-                        statusCode = ex.statusCode.value(),
-                    )
-                }
-                val delay = boundedByDeadline(jitteredBackoff(backoffMs, divisor = 2), deadline)
-                logger.warn(
-                    "Token request {} — attempt {}/{}, retrying in {}ms",
-                    ex.statusCode,
-                    attempt,
-                    TOKEN_MAX_RETRIES,
-                    delay,
-                )
-                waitBudget.sleepOrHandBack(delay, "Retrying the token request after ${ex.statusCode}")
-                backoffMs = (backoffMs * BACKOFF_MULTIPLIER).toLong()
-            } catch (ex: RestClientException) {
-                if (attempt >= TOKEN_MAX_RETRIES) {
-                    logger.warn(
-                        "Token request timed out for tenant [{}] after {} attempts: {}",
-                        tenantId,
-                        attempt,
-                        maskEmailsInText(ex.message),
-                    )
-                    throw GraphMailRetryableException(
-                        "Could not reach Azure Entra (timeout or network error) after $attempt attempts: " +
-                            "${maskEmailsInText(ex.message)}",
-                        ex,
-                    )
-                }
-                val delay = boundedByDeadline(jitteredBackoff(backoffMs, divisor = 2), deadline)
-                logger.warn(
-                    "Token request network error — attempt {}/{}, retrying in {}ms: {}",
-                    attempt,
-                    TOKEN_MAX_RETRIES,
-                    delay,
-                    maskEmailsInText(ex.message),
-                )
-                waitBudget.sleepOrHandBack(delay, "Retrying the token request after a network error")
-                backoffMs = (backoffMs * BACKOFF_MULTIPLIER).toLong()
-            }
-        }
-    }
+    // Up to a fifth more than backoffMs, so retries of concurrent sends spread out.
+    private fun jitteredBackoff(backoffMs: Long): Long =
+        backoffMs + Random.nextLong(0, (backoffMs / 5).coerceAtLeast(1))
 
     // Shared retry loop for every credential-bearing Graph API call (draft creation, upload
-    // session creation, draft send, inline send): deadline-aware, refreshes the cached token
-    // exactly once on 401, honours Retry-After on 429 (capped), and backs off with jitter on
-    // 5xx/network errors.
+    // session creation, draft send, inline send): deadline-aware, retries a login that may clear by
+    // itself, honours Retry-After on 429 (capped), and backs off with jitter on 5xx/network errors.
     //
     // Consolidates what were four near-identical hand-rolled retry loops. Several inconsistencies
     // this also fixes: (1) draft-creation and draft-send previously did NOT retry on
     // connection/transport failures at all — a network blip there was a hard failure, while the
     // same blip during inline send was retried; (2) upload-session creation only ever retried a
-    // 401 once and never retried 429/5xx/network errors at all, and on a second 401 threw a plain
-    // GraphMailException instead of GraphMailTokenExpiredException like the other three flows;
+    // 401 once and never retried 429/5xx/network errors at all;
     // (3) the network-error catch was narrowed to ResourceAccessException everywhere, but
     // RestClient can also wrap a connection reset that happens mid-response-read as a bare
     // RestClientException (thrown from readWithMessageConverters, not doExecute) — catching the
     // broader RestClientException here (after the more specific Http*ErrorException catches)
     // covers both cases without swallowing HTTP status errors, which are matched first.
     private fun <T> sendGraphRequestWithRetry(
-        credentials: GraphCredentials,
+        authentication: GraphMailAuthentication,
         mailbox: String,
         deadline: Long,
         timeoutBudgetMs: Long,
@@ -432,13 +199,12 @@ class GraphMailClientImpl(
         // recipient a duplicate message when it lands wrong. Only set this for steps that are
         // provably repeatable: draft creation and upload-session creation.
         retryOnTransportError: Boolean,
-        request: (token: String, clientRequestId: String) -> T,
+        request: (authorization: String, clientRequestId: String) -> T,
     ): T {
-        var tokenRefreshed = false
-        var forceFreshToken = false
         var attempt = 0
         var backoffMs = INITIAL_BACKOFF_MS
         val waitBudget = WaitBudget()
+        var retriedWithFreshToken = false
 
         while (true) {
             if (System.currentTimeMillis() > deadline) {
@@ -447,50 +213,64 @@ class GraphMailClientImpl(
                 )
             }
             attempt++
-            val token =
-                if (forceFreshToken) {
-                    forceFreshToken = false
-                    forceFreshAccessToken(credentials, deadline)
-                } else {
-                    getAccessToken(credentials, deadline)
+            val authorization =
+                try {
+                    authentication.authorization()
+                } catch (ex: GraphMailRetryableException) {
+                    // Nothing was sent to Graph yet, so this is safe to retry for every step.
+                    if (attempt >= MAX_RETRIES) throw ex
+                    val delay =
+                        jitteredBackoff(backoffMs).coerceAtMost(deadline - System.currentTimeMillis())
+                    logger.warn(
+                        "Login failed during {} — attempt {}/{}, retrying in {}ms: {}",
+                        actionLabel,
+                        attempt,
+                        MAX_RETRIES,
+                        delay,
+                        maskEmailsInText(ex.message),
+                    )
+                    waitBudget.sleepOrHandBack(delay, "Retrying the login during $actionLabel", ex)
+                    backoffMs = (backoffMs * BACKOFF_MULTIPLIER).toLong()
+                    continue
                 }
             // A fresh id per attempt, not per call: Microsoft Support correlates on a single
             // request, and a retry is a different request on their side too.
             val clientRequestId = UUID.randomUUID().toString()
             try {
-                return request(token, clientRequestId)
+                return request(authorization, clientRequestId)
             } catch (ex: HttpClientErrorException) {
                 when (ex.statusCode.value()) {
+                    // Tried once more with a fresh token when the login can fetch one (the client-secret login drops
+                    // the refused token from its cache): a cached token can be revoked or rolled over early. Safe
+                    // for a send too, Graph refused it before processing. The Http Client Authentication plugin
+                    // keeps its token, so there the 401 is final; a revoked token expires within the hour.
                     401 -> {
-                        if (tokenRefreshed) {
-                            logger.error(
-                                "401 Unauthorized after fresh token during {} — {} likely missing",
+                        val ids = correlation(clientRequestId, ex.responseHeaders)
+                        if (!retriedWithFreshToken && authentication.rejected(authorization)) {
+                            retriedWithFreshToken = true
+                            logger.warn(
+                                "Graph refused the token of {} during {} (401) {} — retrying once with a fresh token",
+                                authentication.source,
                                 actionLabel,
-                                permissionHint,
+                                ids,
                             )
-                            throw GraphMailTokenExpiredException(
-                                "Token rejected during $actionLabel (401) even after refresh — check " +
-                                    "$permissionHint [${correlation(clientRequestId, ex.responseHeaders)}]",
-                                ex,
-                            )
+                            continue
                         }
-                        logger.warn(
-                            "401 Unauthorized during {} — invalidating the rejected token for [{}:***] " +
-                                "and retrying once with a freshly fetched one",
+                        val fresh = if (retriedWithFreshToken) " (also with a fresh token)" else ""
+                        logger.error(
+                            "Graph refused the token of {} during {} (401){} {}",
+                            authentication.source,
                             actionLabel,
-                            credentials.tenantId,
+                            fresh,
+                            ids,
                         )
-                        // Drop the entry only while it still holds the token that was just refused:
-                        // another thread may already have refreshed it, and throwing that away would
-                        // cost every caller of this key an extra Azure round-trip.
-                        tokenCache.invalidateIfMatches(cacheKeyFor(credentials), token)
-                        // Then bypass the cache on the retry. Invalidate-and-re-read is not enough:
-                        // a concurrent caller that entered fetch() before the invalidation can write
-                        // the very same rejected token back, and we would retry with a token already
-                        // known to be refused — then report it as a missing permission.
-                        forceFreshToken = true
-                        tokenRefreshed = true
-                        attempt-- // Don't burn a retry attempt on the refresh.
+                        throw GraphMailPermanentException(
+                            "Graph refused the token of ${authentication.source} during $actionLabel (401)$fresh: " +
+                                "grant $permissionHint as an application permission with admin consent, and check " +
+                                "the scope there [$ids]",
+                            ex,
+                            statusCode = 401,
+                        )
                     }
                     429 -> {
                         if (attempt >= MAX_RETRIES) {
@@ -528,7 +308,8 @@ class GraphMailClientImpl(
                         // audit log, which is where an administrator actually looks before opening
                         // a case with Microsoft.
                         val message =
-                            "Graph API rejected $actionLabel (${ex.statusCode}). $remedy [$ids]"
+                            "Graph API rejected $actionLabel (${ex.statusCode}), logged in with " +
+                                "${authentication.source}. $remedy [$ids]"
                         throw if (permanent) {
                             GraphMailPermanentException(message, ex, statusCode = status)
                         } else {
@@ -551,7 +332,7 @@ class GraphMailClientImpl(
                         statusCode = ex.statusCode.value(),
                     )
                 }
-                val delay = jitteredBackoff(backoffMs, divisor = 5).coerceAtMost(deadline - System.currentTimeMillis())
+                val delay = jitteredBackoff(backoffMs).coerceAtMost(deadline - System.currentTimeMillis())
                 logger.warn(
                     "Graph API {} during {} — attempt {}/{}, waiting {}ms",
                     ex.statusCode,
@@ -609,7 +390,7 @@ class GraphMailClientImpl(
                         ex,
                     )
                 }
-                val delay = jitteredBackoff(backoffMs, divisor = 5).coerceAtMost(deadline - System.currentTimeMillis())
+                val delay = jitteredBackoff(backoffMs).coerceAtMost(deadline - System.currentTimeMillis())
                 logger.warn(
                     "Graph API network error during {} — attempt {}/{}, retrying in {}ms",
                     actionLabel,
@@ -617,7 +398,7 @@ class GraphMailClientImpl(
                     MAX_RETRIES,
                     delay,
                 )
-                waitBudget.sleepOrHandBack(delay, "Backing off after a network error during $actionLabel")
+                waitBudget.sleepOrHandBack(delay, "Backing off after a network error during $actionLabel", ex)
                 backoffMs = (backoffMs * BACKOFF_MULTIPLIER).toLong()
             }
         }
@@ -658,14 +439,14 @@ class GraphMailClientImpl(
                     "for Exchange Online."
             413 -> "Payload too large — reduce the attachment size or count."
             422 -> "Graph could not process the message content — check the sanitised HTML body."
-            else -> "Check the mailbox and $permissionHint."
+            else -> "Check the mailbox and the $permissionHint permission."
         }
 
     // True when the failure happened before anything could have been submitted to Graph: name
     // resolution, TCP connect, or the TLS handshake. Anything later (a reset or timeout while the
     // response was awaited) leaves the outcome genuinely unknown.
     private fun neverLeftTheClient(ex: Throwable): Boolean =
-        generateSequence(ex) { it.cause }.take(MAX_CAUSE_DEPTH).any {
+        causesOf(ex).any {
             it is java.net.UnknownHostException ||
                 it is java.net.ConnectException ||
                 it is javax.net.ssl.SSLHandshakeException ||
@@ -686,7 +467,12 @@ class GraphMailClientImpl(
     }
 
     override fun sendMail(
-        credentials: GraphCredentials,
+        authentication: GraphMailAuthentication,
+        mail: OutboundMail,
+    ) = forAuthentication(authentication).send(authentication, mail)
+
+    private fun send(
+        authentication: GraphMailAuthentication,
         mail: OutboundMail,
     ) {
         require(mail.toRecipients.isNotEmpty()) { "At least one recipient is required" }
@@ -723,7 +509,7 @@ class GraphMailClientImpl(
                 needsUploadSession,
                 inlinePayloadBytes,
             )
-            sendViaDraftAndUpload(credentials, mail)
+            sendViaDraftAndUpload(authentication, mail)
         } else {
             val sendMailUri: URI =
                 UriComponentsBuilder
@@ -731,7 +517,7 @@ class GraphMailClientImpl(
                     .buildAndExpand(mail.senderMailbox)
                     .toUri()
             val payload = buildInlinePayload(mail)
-            sendWithRefreshAndRetry(credentials, sendMailUri, payload, mail.senderMailbox)
+            sendInlineWithRetry(authentication, sendMailUri, payload, mail.senderMailbox)
         }
         logger.info("Email sent successfully — recipients: {}", recipientCount)
     }
@@ -761,7 +547,7 @@ class GraphMailClientImpl(
     }
 
     private fun sendViaDraftAndUpload(
-        credentials: GraphCredentials,
+        authentication: GraphMailAuthentication,
         mail: OutboundMail,
     ) {
         val deadline = System.currentTimeMillis() + MAX_DRAFT_SEND_WALL_CLOCK_MS
@@ -775,7 +561,7 @@ class GraphMailClientImpl(
                 bccRecipients = mail.bccRecipients,
                 replyTo = mail.replyToRecipients,
             )
-        val draftId = createDraftWithRetry(credentials, mail.senderMailbox, draftMessage, deadline)
+        val draftId = createDraftWithRetry(authentication, mail.senderMailbox, draftMessage, deadline)
         logger.debug("Draft created id={}", draftId)
 
         // Every upload-phase failure is safe to clean up after: nothing has been sent yet.
@@ -783,7 +569,7 @@ class GraphMailClientImpl(
             for (attachment in mail.attachments) {
                 if (attachment.sizeBytes >= UPLOAD_SESSION_MIN_BYTES) {
                     val uploadUrl =
-                        createUploadSession(credentials, mail.senderMailbox, draftId, attachment, deadline)
+                        createUploadSession(authentication, mail.senderMailbox, draftId, attachment, deadline)
                     uploadInChunks(uploadUrl, attachment, deadline)
                     logger.debug(
                         "Attachment uploaded via session: name='{}' size={}",
@@ -793,7 +579,7 @@ class GraphMailClientImpl(
                 } else {
                     // Below Graph's upload-session minimum: a session cannot be created for this
                     // file, so a plain POST onto the draft is the only route.
-                    addAttachmentWithRetry(credentials, mail.senderMailbox, draftId, attachment, deadline)
+                    addAttachmentWithRetry(authentication, mail.senderMailbox, draftId, attachment, deadline)
                     logger.debug(
                         "Attachment posted onto draft: name='{}' size={}",
                         attachment.name,
@@ -802,7 +588,7 @@ class GraphMailClientImpl(
                 }
             }
         } catch (ex: Exception) {
-            deleteDraftBestEffort(credentials, mail.senderMailbox, draftId)
+            deleteDraftBestEffort(authentication, mail.senderMailbox, draftId)
             throw ex
         }
 
@@ -821,17 +607,17 @@ class GraphMailClientImpl(
         // five per failing send. Permanent failures are the same story: no send, no retry, and
         // still an orphan.
         try {
-            sendDraftWithRetry(credentials, mail.senderMailbox, draftId, deadline)
+            sendDraftWithRetry(authentication, mail.senderMailbox, draftId, deadline)
         } catch (ex: GraphMailUnknownOutcomeException) {
             throw ex
         } catch (ex: Exception) {
-            deleteDraftBestEffort(credentials, mail.senderMailbox, draftId)
+            deleteDraftBestEffort(authentication, mail.senderMailbox, draftId)
             throw ex
         }
     }
 
     private fun deleteDraftBestEffort(
-        credentials: GraphCredentials,
+        authentication: GraphMailAuthentication,
         senderMailbox: String,
         draftId: String,
     ) {
@@ -841,11 +627,11 @@ class GraphMailClientImpl(
                     .fromUriString("$graphBaseUrl/v1.0/users/{mailbox}/messages/{id}")
                     .buildAndExpand(senderMailbox, draftId)
                     .toUri()
-            val token = getAccessToken(credentials)
+            val authorization = authentication.authorization()
             restClient
                 .delete()
                 .uri(uri)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .header(HttpHeaders.AUTHORIZATION, authorization)
                 .retrieve()
                 .toBodilessEntity()
             logger.debug("Orphaned draft deleted id={}", draftId)
@@ -855,7 +641,7 @@ class GraphMailClientImpl(
     }
 
     private fun createDraftWithRetry(
-        credentials: GraphCredentials,
+        authentication: GraphMailAuthentication,
         senderMailbox: String,
         message: GraphMessage,
         deadline: Long,
@@ -867,20 +653,20 @@ class GraphMailClientImpl(
                 .toUri()
 
         return sendGraphRequestWithRetry(
-            credentials,
+            authentication,
             senderMailbox,
             deadline,
             MAX_DRAFT_SEND_WALL_CLOCK_MS,
             actionLabel = "draft creation",
-            permissionHint = "Mail.ReadWrite permission",
+            permissionHint = "Mail.ReadWrite",
             // Safe to retry: a duplicate draft is invisible to the recipient, and an orphan is
             // cleaned up by deleteDraftBestEffort.
             retryOnTransportError = true,
-        ) { token, clientRequestId ->
+        ) { authorization, clientRequestId ->
             restClient
                 .post()
                 .uri(uri)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .header(HttpHeaders.AUTHORIZATION, authorization)
                 .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(message)
@@ -894,7 +680,7 @@ class GraphMailClientImpl(
     // POSTs a sub-minimum attachment onto the draft; one request per file.
     // POSTs a sub-minimum attachment onto an existing draft; one request per file.
     private fun addAttachmentWithRetry(
-        credentials: GraphCredentials,
+        authentication: GraphMailAuthentication,
         senderMailbox: String,
         draftId: String,
         attachment: ResolvedAttachment,
@@ -914,20 +700,20 @@ class GraphMailClientImpl(
             )
 
         sendGraphRequestWithRetry(
-            credentials,
+            authentication,
             senderMailbox,
             deadline,
             MAX_DRAFT_SEND_WALL_CLOCK_MS,
             actionLabel = "attaching '${attachment.name}'",
-            permissionHint = "Mail.ReadWrite permission",
+            permissionHint = "Mail.ReadWrite",
             // Safe to retry: the draft has not been sent, and a duplicate attachment on a draft that
             // is discarded on failure costs nothing a recipient can see.
             retryOnTransportError = true,
-        ) { token, clientRequestId ->
+        ) { authorization, clientRequestId ->
             restClient
                 .post()
                 .uri(uri)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .header(HttpHeaders.AUTHORIZATION, authorization)
                 .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
@@ -937,7 +723,7 @@ class GraphMailClientImpl(
     }
 
     private fun createUploadSession(
-        credentials: GraphCredentials,
+        authentication: GraphMailAuthentication,
         senderMailbox: String,
         draftId: String,
         attachment: ResolvedAttachment,
@@ -961,19 +747,19 @@ class GraphMailClientImpl(
 
         val uploadUrl =
             sendGraphRequestWithRetry(
-                credentials,
+                authentication,
                 senderMailbox,
                 deadline,
                 MAX_DRAFT_SEND_WALL_CLOCK_MS,
                 actionLabel = "upload session creation",
-                permissionHint = "Mail.ReadWrite permission",
+                permissionHint = "Mail.ReadWrite",
                 // Safe to retry: creating a second upload session has no user-visible effect.
                 retryOnTransportError = true,
-            ) { token, clientRequestId ->
+            ) { authorization, clientRequestId ->
                 restClient
                     .post()
                     .uri(uri)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                    .header(HttpHeaders.AUTHORIZATION, authorization)
                     .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
@@ -1154,7 +940,7 @@ class GraphMailClientImpl(
                     val delay =
                         (500L * (1 shl (chunkAttempt - 1)))
                             .coerceAtMost(deadline - System.currentTimeMillis())
-                    waitBudget.sleepOrHandBack(delay, "Backing off after a network error during chunk upload")
+                    waitBudget.sleepOrHandBack(delay, "Backing off after a network error during chunk upload", ex)
                 }
             }
             // Graph's reported range is authoritative, including when it points *backwards*: that
@@ -1194,7 +980,7 @@ class GraphMailClientImpl(
     }
 
     private fun sendDraftWithRetry(
-        credentials: GraphCredentials,
+        authentication: GraphMailAuthentication,
         senderMailbox: String,
         draftId: String,
         deadline: Long,
@@ -1206,19 +992,19 @@ class GraphMailClientImpl(
                 .toUri()
 
         sendGraphRequestWithRetry(
-            credentials,
+            authentication,
             senderMailbox,
             deadline,
             MAX_DRAFT_SEND_WALL_CLOCK_MS,
             actionLabel = "draft send",
-            permissionHint = "Mail.Send permission",
+            permissionHint = "Mail.Send",
             // NOT safe to retry: the draft may already have been accepted for delivery.
             retryOnTransportError = false,
-        ) { token, clientRequestId ->
+        ) { authorization, clientRequestId ->
             restClient
                 .post()
                 .uri(uri)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .header(HttpHeaders.AUTHORIZATION, authorization)
                 .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                 .contentLength(0)
                 .retrieve()
@@ -1226,27 +1012,27 @@ class GraphMailClientImpl(
         }
     }
 
-    private fun sendWithRefreshAndRetry(
-        credentials: GraphCredentials,
+    private fun sendInlineWithRetry(
+        authentication: GraphMailAuthentication,
         url: URI,
         payload: SendMailRequest,
         mailbox: String,
     ) {
         val deadline = System.currentTimeMillis() + MAX_SEND_WALL_CLOCK_MS
         sendGraphRequestWithRetry(
-            credentials,
+            authentication,
             mailbox,
             deadline,
             MAX_SEND_WALL_CLOCK_MS,
             actionLabel = "email send",
-            permissionHint = "Mail.Send permission",
+            permissionHint = "Mail.Send",
             // NOT safe to retry: Graph may already have queued the message for delivery.
             retryOnTransportError = false,
-        ) { token, clientRequestId ->
+        ) { authorization, clientRequestId ->
             restClient
                 .post()
                 .uri(url)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .header(HttpHeaders.AUTHORIZATION, authorization)
                 .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(payload)

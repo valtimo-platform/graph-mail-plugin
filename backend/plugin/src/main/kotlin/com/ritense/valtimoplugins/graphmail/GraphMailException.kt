@@ -44,3 +44,17 @@ class GraphMailUnknownOutcomeException(
     message: String,
     cause: Throwable? = null,
 ) : GraphMailException(message, cause, statusCode = 500)
+
+/**
+ * The certificates of the selected Http Client Authentication configuration could not be used: they
+ * could not be loaded, or the gateway rejected them — in TLS, or with an HTTP error that did not come
+ * from Microsoft. Either way the request did not reach Microsoft, so nothing was sent.
+ *
+ * Its own type so the audit log and the metrics can point at the certificates instead of at the
+ * login or the mailbox, which is where the Microsoft-oriented messages for the same status codes
+ * would send an administrator.
+ */
+class GraphMailCertificateException(
+    message: String,
+    cause: Throwable? = null,
+) : GraphMailException(message, cause, statusCode = 502)

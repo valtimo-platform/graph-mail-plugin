@@ -26,8 +26,10 @@ import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argThat
 import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.springframework.context.ApplicationEventPublisher
@@ -39,6 +41,7 @@ import java.util.concurrent.atomic.AtomicLong
 private const val VALID_CONFIG_ID = "11111111-1111-1111-1111-111111111111"
 private const val VALID_RECIPIENT = "recipient@test.nl"
 private const val VALID_SENDER = "sender@test.nl"
+private const val LOGIN_ID = "22222222-2222-2222-2222-222222222222"
 
 class GraphMailTestSendControllerTest {
     private val mailClient: GraphMailClient = mock()
@@ -49,16 +52,21 @@ class GraphMailTestSendControllerTest {
         mock<Authentication>().also {
             whenever(it.name).thenReturn("test-admin")
         }
+    private val graphLogin = GraphMailAuthentication("the login", null) { "Bearer token" }
+    private val login: GraphMailLogin = mock { on { resolve(LOGIN_ID) } doReturn graphLogin }
     private lateinit var controller: GraphMailTestSendController
 
     private fun plugin(
         sender: String? = VALID_SENDER,
         allowlist: String? = "@test.nl",
     ): GraphMailPlugin =
-        GraphMailPlugin(mailClient, storage, eventPublisher).apply {
-            tenantId = "tenant-id"
-            clientId = "client-id"
-            clientSecret = "client-secret"
+        GraphMailPlugin(
+            mailClient,
+            storage,
+            eventPublisher,
+            login = login,
+        ).apply {
+            authenticationPluginConfiguration = LOGIN_ID
             // allowlist == null simulates a pre-allowlist configuration (property never injected).
             if (allowlist != null) allowedSenders = allowlist
             testSenderMailbox = sender
@@ -226,13 +234,45 @@ class GraphMailTestSendControllerTest {
         assertTrue(store.size < rateLimitStoreMaxEntries)
     }
 
-    @Test fun `passes decrypted credentials from plugin instance to mailClient`() {
+    @Test fun `sends with the login of the configuration`() {
         stubPlugin()
         send()
-        verify(mailClient).sendMail(
-            eq(GraphCredentials("tenant-id", "client-id", "client-secret")),
-            argThat { senderMailbox == VALID_SENDER },
-        )
+        verify(mailClient).sendMail(eq(graphLogin), argThat { senderMailbox == VALID_SENDER })
+    }
+
+    @Test fun `a login that can't be used is a 400 with its message, and nothing is sent`() {
+        stubPlugin()
+        whenever(login.resolve(LOGIN_ID)).thenThrow(IllegalStateException("'Graph login' has an audience"))
+
+        val response = send()
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+        assertTrue(response.body!!.message.contains("'Graph login' has an audience"), response.body!!.message)
+        verify(mailClient, never()).sendMail(any(), any())
+    }
+
+    @Test fun `certificates that can't be loaded are reported as such`() {
+        stubPlugin()
+        whenever(
+            login.resolve(LOGIN_ID),
+        ).thenThrow(GraphMailCertificateException("The certificates of X could not be loaded"))
+
+        val response = send()
+
+        assertEquals(HttpStatus.BAD_GATEWAY, response.statusCode)
+        assertTrue(response.body!!.message.startsWith("Certificaten — The certificates of X"), response.body!!.message)
+    }
+
+    @Test fun `an unexpected failure of the login is reported, and nothing is sent`() {
+        stubPlugin()
+        whenever(login.resolve(LOGIN_ID)).thenThrow(RuntimeException("could not create the instance"))
+
+        val response = send()
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.statusCode)
+        assertFalse(response.body!!.success)
+        assertTrue(response.body!!.message.contains("could not create the instance"), response.body!!.message)
+        verify(mailClient, never()).sendMail(any(), any())
     }
 
     @Test fun `sends to the recipient from the request`() {
@@ -258,27 +298,21 @@ class GraphMailTestSendControllerTest {
 
     // ── Error mapping ──────────────────────────────────────────────────────────────
 
-    @Test fun `maps GraphMailTokenExpiredException to HTTP 502 with Graph status 401 in the body`() {
+    @Test fun `a refused token is HTTP 502 with Graph status 401 and the advice of the exception`() {
         stubPlugin()
-        stubSendMail().thenThrow(GraphMailTokenExpiredException("token expired"))
+        stubSendMail().thenThrow(
+            GraphMailPermanentException(
+                "Graph refused the token of the login (401): grant Mail.Send",
+                statusCode = 401,
+            ),
+        )
         val response = send()
         // Upstream 401 is surfaced as 502: Graph refused OUR token, the admin's session is fine.
         assertEquals(HttpStatus.BAD_GATEWAY, response.statusCode)
         assertFalse(response.body!!.success)
         assertEquals(401, response.body!!.statusCode)
-        assertTrue(response.body!!.message.contains("Client Secret"))
-    }
-
-    @Test fun `a generic upstream 401 also becomes HTTP 502`() {
-        // Not only the typed token exception: any Graph 401 must stay off the wire as a 401, or the
-        // frontend's auth interceptor reads it as an expired admin session and logs the user out.
-        stubPlugin()
-        stubSendMail().thenThrow(GraphMailException("unauthorized", statusCode = 401))
-
-        val response = send()
-
-        assertEquals(HttpStatus.BAD_GATEWAY, response.statusCode)
-        assertEquals(401, response.body!!.statusCode)
+        assertTrue(response.body!!.message.contains("Graph refused the token of the login"), response.body!!.message)
+        assertFalse(response.body!!.message.contains("Client Secret"), response.body!!.message)
     }
 
     @Test fun `an exception message containing an address is masked in the response`() {
@@ -298,9 +332,9 @@ class GraphMailTestSendControllerTest {
         assertTrue(message.contains("g***@gemeente.nl"), "expected a masked address, got: $message")
     }
 
-    @Test fun `maps 403 GraphMailException to Mail Send permission message`() {
+    @Test fun `shows the message of a 403 GraphMailException`() {
         stubPlugin()
-        stubSendMail().thenThrow(GraphMailException("forbidden", statusCode = 403))
+        stubSendMail().thenThrow(GraphMailException("Access denied — grant Mail.Send", statusCode = 403))
         val response = send()
         assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
         assertFalse(response.body!!.success)
@@ -308,24 +342,25 @@ class GraphMailTestSendControllerTest {
         assertTrue(response.body!!.message.contains("Mail.Send"))
     }
 
-    @Test fun `maps 429 GraphMailException to rate-limit message`() {
+    @Test fun `shows the message of a 429 GraphMailException`() {
         stubPlugin()
         stubSendMail().thenThrow(GraphMailException("rate limited", statusCode = 429))
         val response = send()
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.statusCode)
         assertFalse(response.body!!.success)
         assertEquals(429, response.body!!.statusCode)
-        assertTrue(response.body!!.message.contains("429"))
+        assertTrue(response.body!!.message.contains("rate limited"), response.body!!.message)
     }
 
-    @Test fun `maps 503 GraphMailException to service-unavailable message`() {
+    @Test fun `does not hide the message of a 503 GraphMailException`() {
+        // A gateway's 503 used to read only "tijdelijk niet beschikbaar", hiding what failed.
         stubPlugin()
-        stubSendMail().thenThrow(GraphMailException("unavailable", statusCode = 503))
+        stubSendMail().thenThrow(GraphMailException("The gateway answered 503", statusCode = 503))
         val response = send()
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.statusCode)
         assertFalse(response.body!!.success)
         assertEquals(503, response.body!!.statusCode)
-        assertTrue(response.body!!.message.contains("503"))
+        assertTrue(response.body!!.message.contains("The gateway answered 503"), response.body!!.message)
     }
 
     @Test fun `maps unexpected exception to 500`() {

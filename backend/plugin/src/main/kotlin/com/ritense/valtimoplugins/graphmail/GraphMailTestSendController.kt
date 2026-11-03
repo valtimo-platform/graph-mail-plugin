@@ -11,8 +11,6 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.client.HttpClientErrorException
-import org.springframework.web.client.HttpServerErrorException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -24,9 +22,7 @@ private const val RATE_LIMIT_STORE_MAX_ENTRIES = 1_000
 @RequestMapping("/api/v1/plugin/entra")
 class GraphMailTestSendController(
     private val graphMailClient: GraphMailClient,
-    // PluginService hydrates the plugin instance with decrypted @PluginProperty(secret=true) values.
-    // Reading clientSecret directly from PluginConfigurationRepository would yield AES ciphertext,
-    // not the actual secret — causing every test-send to fail with a misleading 401.
+    // Creates the plugin instance of the configuration, as the process action gets it.
     private val pluginService: PluginService,
     private val eventPublisher: ApplicationEventPublisher,
 ) {
@@ -151,15 +147,25 @@ class GraphMailTestSendController(
             maskEmail(testSender),
         )
 
+        // The login of the configuration, as on the process action path. One that can't be used is a
+        // configuration problem, reported with its own message. Anything else (the certificates, creating the
+        // Http Client Authentication instance) is reported like a failed send, not as an unhandled 500.
+        val login =
+            try {
+                plugin.authentication()
+            } catch (ex: IllegalStateException) {
+                logger.warn("Test send rejected — login: {}", ex.message)
+                return ResponseEntity
+                    .badRequest()
+                    .body(GraphMailTestSendResponse(false, "Aanmelden niet mogelijk — ${ex.message}", 400))
+            } catch (ex: Exception) {
+                return failure(ex)
+            }
+
         val sendStart = System.currentTimeMillis()
         return try {
             graphMailClient.sendMail(
-                credentials =
-                    GraphCredentials(
-                        tenantId = plugin.tenantId,
-                        clientId = plugin.clientId,
-                        clientSecret = plugin.clientSecret,
-                    ),
+                authentication = login,
                 mail =
                     OutboundMail(
                         senderMailbox = testSender,
@@ -188,55 +194,37 @@ class GraphMailTestSendController(
                     statusCode = 202,
                 ),
             )
-        } catch (ex: GraphMailTokenExpiredException) {
-            val message = "Authenticatie mislukt (401) — token geweigerd door Graph API, controleer Client Secret"
-            logger.warn("Test send failed — {}", message)
-            // Deliberately NOT an HTTP 401. This is Graph rejecting *our* token, not the admin's
-            // session being invalid — and a 401 on the wire makes the frontend's auth interceptor
-            // log the administrator out over nothing more than a mistyped client secret. The Graph
-            // status stays visible in the response body.
-            ResponseEntity
-                .status(HttpStatus.BAD_GATEWAY)
-                .body(GraphMailTestSendResponse(false, message, 401))
         } catch (ex: Exception) {
-            val rawStatus =
-                when (ex) {
-                    is GraphMailException -> ex.statusCode
-                    is HttpClientErrorException -> ex.statusCode.value()
-                    is HttpServerErrorException -> ex.statusCode.value()
-                    else -> 500
-                }
-            val statusCode = if (rawStatus in 100..599) rawStatus else 500
-            // Same reasoning as the GraphMailTokenExpiredException branch above: an upstream 401
-            // must not surface as a 401 from this API.
-            val httpStatus = if (statusCode == 401) 502 else statusCode
-            val message =
-                when (statusCode) {
-                    400 -> "Ongeldige aanvraag (400) — controleer Tenant ID en Client ID"
-                    401 -> "Authenticatie mislukt (401) — controleer Tenant ID, Client ID en Client Secret"
-                    403 -> "Toegang geweigerd (403) — controleer of Mail.Send is toegekend in de Azure App Registration"
-                    429 -> "Te veel verzoeken (429) — probeer het over een moment opnieuw"
-                    503, 502, 504 ->
-                        "Azure / Graph API tijdelijk niet beschikbaar ($statusCode) — " +
-                            "probeer het later opnieuw"
-                    // The raw exception message can carry mailbox addresses, internal hostnames or Graph
-                    // request ids. The plugin action path already masks those before they leave the JVM
-                    // (see EMAIL_IN_TEXT_REGEX in GraphMailPlugin); this endpoint has to do the same,
-                    // because its message goes straight into the admin UI.
-                    else -> "Fout $statusCode: ${maskEmailsInText(ex.message) ?: "Onbekende fout"}"
-                }
-            // Deliberately not passing `ex` itself: its message (and the URIs inside it) can carry
-            // the sender mailbox, and a logged throwable prints that message alongside the stack
-            // trace — undoing the masking applied to the response a few lines above.
-            logger.warn(
-                "Test send failed — status: {}, type: {}, cause: {}",
-                statusCode,
-                ex.javaClass.simpleName,
-                maskEmailsInText(ex.message),
-            )
-            ResponseEntity
-                .status(httpStatus)
-                .body(GraphMailTestSendResponse(false, message, statusCode))
+            failure(ex)
         }
+    }
+
+    // A Graph Mail failure says what to check itself (the login, the certificates, the permission); anything else gets
+    // its status. Masked: the message can carry mailbox addresses, and it goes straight into the admin UI.
+    private fun failure(ex: Exception): ResponseEntity<GraphMailTestSendResponse> {
+        val rawStatus = (ex as? GraphMailException)?.statusCode ?: 500
+        val statusCode = if (rawStatus in 100..599) rawStatus else 500
+        // Deliberately not an HTTP 401 for an upstream 401: that is Graph or the token endpoint rejecting
+        // *our* login, not the admin's session — and a 401 on the wire makes the frontend's auth
+        // interceptor log the administrator out. The upstream status stays visible in the body.
+        val httpStatus = if (statusCode == 401) 502 else statusCode
+        val message =
+            when (ex) {
+                is GraphMailCertificateException -> "Certificaten — ${maskEmailsInText(ex.message)}"
+                is GraphMailException -> "Verzenden mislukt ($statusCode) — ${maskEmailsInText(ex.message)}"
+                else -> "Fout $statusCode: ${maskEmailsInText(ex.message) ?: "Onbekende fout"}"
+            }
+        // Deliberately not passing `ex` itself: its message (and the URIs inside it) can carry
+        // the sender mailbox, and a logged throwable prints that message alongside the stack
+        // trace — undoing the masking applied to the response.
+        logger.warn(
+            "Test send failed — status: {}, type: {}, cause: {}",
+            statusCode,
+            ex.javaClass.simpleName,
+            maskEmailsInText(ex.message),
+        )
+        return ResponseEntity
+            .status(httpStatus)
+            .body(GraphMailTestSendResponse(false, message, statusCode))
     }
 }

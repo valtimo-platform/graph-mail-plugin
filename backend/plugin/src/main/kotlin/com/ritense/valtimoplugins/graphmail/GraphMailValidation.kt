@@ -100,3 +100,9 @@ internal fun maskEmailsInText(text: String?): String? = text?.replace(EMAIL_IN_T
 // before they reach Spring Application Events / audit logs. Pattern kept in sync with EMAIL_REGEX.
 internal val EMAIL_IN_TEXT_REGEX =
     Regex("[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9][a-zA-Z0-9.\\-]*\\.[a-zA-Z]{2,}")
+
+// Bound the cause-chain walk; a self-referential chain would otherwise hang the classifier.
+private const val MAX_CAUSE_DEPTH = 10
+
+// The exception and its causes, for classifying a failure by what is underneath.
+internal fun causesOf(ex: Throwable): List<Throwable> = generateSequence(ex) { it.cause }.take(MAX_CAUSE_DEPTH).toList()

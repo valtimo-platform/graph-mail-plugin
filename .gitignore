@@ -176,3 +176,8 @@ frontend/package-lock.json
 .kotlin
 .idea
 migration
+
+######################
+# Claude Code
+######################
+.claude/

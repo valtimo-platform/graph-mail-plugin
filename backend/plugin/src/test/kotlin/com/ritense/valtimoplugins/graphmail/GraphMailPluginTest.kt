@@ -15,6 +15,10 @@
  */
 package com.ritense.valtimoplugins.graphmail
 
+import com.ritense.plugin.annotation.PluginEvent
+import com.ritense.plugin.annotation.PluginProperty
+import com.ritense.plugin.domain.EventType
+import com.ritense.plugin.service.PluginService
 import com.ritense.resource.domain.MetadataType
 import com.ritense.resource.service.TemporaryResourceStorageService
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -26,8 +30,11 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.doThrow
+import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
@@ -40,12 +47,16 @@ import java.util.concurrent.atomic.AtomicReference
 
 private const val VALID_CONTENT_UUID = "22222222-2222-2222-2222-222222222222"
 private const val VALID_UUID = "11111111-1111-1111-1111-111111111111"
+private const val LOGIN_ID = "33333333-3333-3333-3333-333333333333"
 
 class GraphMailPluginTest {
     private val mailClient: GraphMailClient = mock()
     private val storage: TemporaryResourceStorageService = mock()
     private val execution: DelegateExecution = mock()
     private val eventPublisher: ApplicationEventPublisher = mock()
+    private val graphLogin = GraphMailAuthentication("the login", null) { "Bearer token" }
+    private val login: GraphMailLogin = mock { on { resolve(LOGIN_ID) } doReturn graphLogin }
+    private val pluginService: PluginService = mock()
     private lateinit var plugin: GraphMailPlugin
 
     // Stands in for the process instance's variable map.
@@ -55,10 +66,13 @@ class GraphMailPluginTest {
     fun setUp() {
         processVariables.clear()
         plugin =
-            GraphMailPlugin(mailClient, storage, eventPublisher).apply {
-                tenantId = "test-tenant"
-                clientId = "test-client"
-                clientSecret = "test-secret"
+            GraphMailPlugin(
+                mailClient,
+                storage,
+                eventPublisher,
+                login = login,
+            ).apply {
+                authenticationPluginConfiguration = LOGIN_ID
                 allowedSenders = "@test.nl"
             }
         whenever(execution.id).thenReturn("execution-1")
@@ -118,13 +132,130 @@ class GraphMailPluginTest {
         assertEquals("afdeling@test.nl", captor.firstValue.senderMailbox)
     }
 
-    @Test fun `passes credentials to mailClient`() {
-        val captor = argumentCaptor<GraphCredentials>()
+    @Test fun `sends with the login of the selected configuration`() {
         send()
-        verify(mailClient).sendMail(captor.capture(), any())
-        assertEquals("test-tenant", captor.firstValue.tenantId)
-        assertEquals("test-client", captor.firstValue.clientId)
-        assertEquals("test-secret", captor.firstValue.clientSecret)
+        verify(login).resolve(LOGIN_ID)
+        verify(mailClient).sendMail(eq(graphLogin), any())
+    }
+
+    @Test fun `a login that can't be used fails the send, audited, without sending`() {
+        whenever(login.resolve(LOGIN_ID)).thenThrow(IllegalStateException("'Graph login' has an audience"))
+
+        val ex = assertThrows<IllegalStateException> { send() }
+
+        assertEquals("'Graph login' has an audience", ex.message)
+        verify(mailClient, never()).sendMail(any(), any())
+        verify(eventPublisher).publishEvent(any<GraphMailEmailFailedEvent>())
+    }
+
+    @Test fun `a 1x configuration without a reference sends with its own client secret`() {
+        val credentials = GraphCredentials("tenant-1", "client-1", "secret-1")
+        whenever(login.resolve(null, credentials)).thenReturn(graphLogin)
+        plugin.apply {
+            authenticationPluginConfiguration = null
+            tenantId = "tenant-1"
+            clientId = "client-1"
+            clientSecret = "secret-1"
+        }
+
+        send()
+
+        verify(login).resolve(null, credentials)
+        verify(mailClient).sendMail(eq(graphLogin), any())
+    }
+
+    // ── Checks on save and deploy ────────────────────────────────────────────
+
+    @Test fun `a configuration that can supply a token is accepted on save`() {
+        plugin.checkConfiguration()
+
+        verify(login).validate(LOGIN_ID, null)
+    }
+
+    @Test fun `a 1x configuration is checked with its own client secret, not refused`() {
+        plugin.apply {
+            authenticationPluginConfiguration = null
+            tenantId = "tenant-1"
+            clientId = "client-1"
+            clientSecret = "secret-1"
+        }
+
+        plugin.checkConfiguration()
+
+        verify(login).validate(null, GraphCredentials("tenant-1", "client-1", "secret-1"))
+    }
+
+    @Test fun `an incomplete client-secret login is handed to the login to name what is missing`() {
+        plugin.apply {
+            authenticationPluginConfiguration = null
+            tenantId = "tenant-1"
+        }
+
+        plugin.checkConfiguration()
+
+        verify(login).validate(null, GraphCredentials("tenant-1", "", ""))
+    }
+
+    @Test fun `the reference is an optional plain property, so a 1x configuration needs none`() {
+        val property =
+            GraphMailPlugin::class.java
+                .getDeclaredField("authenticationPluginConfiguration")
+                .getAnnotation(PluginProperty::class.java)
+
+        assertEquals("authenticationPluginConfiguration", property.key)
+        assertFalse(property.required)
+        assertFalse(property.secret)
+    }
+
+    // Removing them, or making clientSecret non-secret, would leave the secrets stored by 1.x encrypted and
+    // unreadable, and store one from a *.pluginconfig.json unencrypted.
+    @Test fun `the 1x login properties are still defined, optional, with clientSecret a secret`() {
+        val properties =
+            listOf("tenantId", "clientId", "clientSecret").associateWith {
+                GraphMailPlugin::class.java.getDeclaredField(it).getAnnotation(PluginProperty::class.java)
+            }
+
+        properties.forEach { (key, property) ->
+            assertEquals(key, property.key)
+            assertFalse(property.required, key)
+        }
+        assertFalse(properties.getValue("tenantId").secret)
+        assertFalse(properties.getValue("clientId").secret)
+        assertTrue(properties.getValue("clientSecret").secret)
+    }
+
+    @Test fun `the checks run when Valtimo creates, deploys or updates a configuration`() {
+        val event = GraphMailPlugin::class.java.getMethod("checkConfiguration").getAnnotation(PluginEvent::class.java)
+
+        assertEquals(setOf(EventType.CREATE, EventType.UPDATE), event.invokedOn.toSet())
+    }
+
+    @Test fun `the factory hands the plugin the shared login`() {
+        val factory =
+            GraphMailPluginFactory(
+                pluginService,
+                mailClient,
+                storage,
+                eventPublisher,
+                SendIdempotencyGuard(),
+                AttachmentConcurrencyLimiter(),
+                GraphMailMetrics(null),
+                login,
+            )
+        val created = GraphMailPluginFactory::class.java.getDeclaredMethod("create").invoke(factory) as GraphMailPlugin
+        created.authenticationPluginConfiguration = LOGIN_ID
+
+        created.checkConfiguration()
+
+        verify(login).validate(LOGIN_ID, null)
+    }
+
+    @Test fun `a reference that can't supply a token is refused on save`() {
+        whenever(login.validate(LOGIN_ID, null)).thenThrow(IllegalStateException("'Graph login' has no scope"))
+
+        val ex = assertThrows<IllegalStateException> { plugin.checkConfiguration() }
+
+        assertEquals("'Graph login' has no scope", ex.message)
     }
 
     @Test fun `rejects invalid sender mailbox`() {
@@ -169,10 +300,13 @@ class GraphMailPluginTest {
     @Test fun `rejects send when allowedSenders is not configured`() {
         // Simulates a pre-allowlist plugin configuration where Valtimo never injected the property.
         val legacyPlugin =
-            GraphMailPlugin(mailClient, storage, eventPublisher).apply {
-                tenantId = "test-tenant"
-                clientId = "test-client"
-                clientSecret = "test-secret"
+            GraphMailPlugin(
+                mailClient,
+                storage,
+                eventPublisher,
+                login = login,
+            ).apply {
+                authenticationPluginConfiguration = LOGIN_ID
             }
         assertThrows<IllegalStateException> {
             legacyPlugin.sendEmail(
@@ -450,6 +584,35 @@ class GraphMailPluginTest {
         )
     }
 
+    @Test fun `a certificate failure, also while logging in, is counted under its own verdict`() {
+        val registry = SimpleMeterRegistry()
+        whenever(login.resolve(LOGIN_ID)).thenThrow(GraphMailCertificateException("could not be loaded"))
+
+        assertThrows<GraphMailCertificateException> {
+            pluginWithMetrics(registry).sendEmail(
+                execution,
+                "afzender@test.nl",
+                "jan@test.nl",
+                null,
+                null,
+                null,
+                "Onderwerp",
+                VALID_CONTENT_UUID,
+                null,
+            )
+        }
+
+        assertEquals(
+            1.0,
+            registry
+                .find("graph.mail.sends")
+                .tag("outcome", "CERTIFICATES")
+                .counter()
+                ?.count(),
+            "got ${registry.meters.map { it.id }}",
+        )
+    }
+
     private fun pluginWithMetrics(registry: SimpleMeterRegistry) =
         GraphMailPlugin(
             mailClient,
@@ -458,10 +621,9 @@ class GraphMailPluginTest {
             SendIdempotencyGuard(),
             AttachmentConcurrencyLimiter(),
             GraphMailMetrics(registry),
+            login,
         ).apply {
-            tenantId = "test-tenant"
-            clientId = "test-client"
-            clientSecret = "test-secret"
+            authenticationPluginConfiguration = LOGIN_ID
             allowedSenders = "@test.nl"
         }
 
@@ -653,13 +815,17 @@ class GraphMailPluginTest {
         // so the limit would bound concurrency without bounding memory — the thing it exists for.
         val limiter = AttachmentConcurrencyLimiter(permits = 1, acquireTimeoutMs = 100)
         val gatedPlugin =
-            GraphMailPlugin(mailClient, storage, eventPublisher, SendIdempotencyGuard(), limiter)
-                .apply {
-                    tenantId = "test-tenant"
-                    clientId = "test-client"
-                    clientSecret = "test-secret"
-                    allowedSenders = "@test.nl"
-                }
+            GraphMailPlugin(
+                mailClient,
+                storage,
+                eventPublisher,
+                SendIdempotencyGuard(),
+                limiter,
+                login = login,
+            ).apply {
+                authenticationPluginConfiguration = LOGIN_ID
+                allowedSenders = "@test.nl"
+            }
         whenever(storage.getResourceMetadata(VALID_UUID)).thenReturn(
             mapOf("filename" to "a.bin", "contentType" to "application/octet-stream"),
         )

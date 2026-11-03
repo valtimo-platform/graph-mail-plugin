@@ -53,17 +53,19 @@ private val UPLOAD_HOSTS_PER_CLOUD =
 /**
  * Deployment-level HTTP settings for the Graph Mail plugin.
  *
- * These used to be `@PluginProperty` fields on [GraphMailPlugin], editable per plugin configuration
- * from the admin UI. That was a credential-exfiltration path: the client secret is POSTed to
- * `tokenBaseUrl` as a form field, so anyone who could edit a plugin configuration could point that
- * at a host they control and harvest it. `graphBaseUrl` was an SSRF primitive on top of that, and
- * the upload-URL host check derived its expected host *from* `graphBaseUrl` — so the check was only
- * ever as strong as the value an administrator typed in.
+ * `graphBaseUrl` used to be a `@PluginProperty` field on [GraphMailPlugin], editable per plugin
+ * configuration from the admin UI: an SSRF primitive, and the upload-URL host check derived its
+ * expected host *from* it — so the check was only ever as strong as the value an administrator typed
+ * in. Here it is under deployment control (application.yml / environment variables, changed by
+ * whoever operates the platform) and validated once, at startup, against a fixed allowlist. These
+ * are also genuinely deployment concerns rather than per-configuration ones: two plugin
+ * configurations in the same GZAC instance have no reason to talk to different clouds.
  *
- * Moving them here puts them under deployment control (application.yml / environment variables,
- * changed by whoever operates the platform) and lets them be validated once, at startup, against a
- * fixed allowlist. They are also genuinely deployment concerns rather than per-configuration ones:
- * two plugin configurations in the same GZAC instance have no reason to talk to different clouds.
+ * `tokenBaseUrl` is only for the deprecated 1.x login (client secret in the Graph Mail
+ * configuration), which POSTs the client secret to it as a form field: an admin-editable value
+ * there was a way to walk off with the secret, which is why it is a deployment setting and checked
+ * against Microsoft's login hosts. A configuration that selects an Http Client Authentication
+ * configuration logs in through that one instead; its token endpoint and connection are not here.
  */
 @ConfigurationProperties("graph-mail.http")
 data class GraphMailHttpProperties(
@@ -85,14 +87,15 @@ data class GraphMailHttpProperties(
      */
     val allowNonMicrosoftEndpoints: Boolean = false,
     /**
-     * Outbound proxy for Graph and token traffic. Leave unset to use whatever the JVM is already
-     * configured with (`-Dhttps.proxyHost` and friends) — that covers the common case, where the
-     * whole application shares one egress proxy.
+     * Outbound proxy for Graph traffic, and for the token request of the deprecated client-secret
+     * login. Leave unset to use whatever the JVM is already configured with (`-Dhttps.proxyHost`
+     * and friends) — that covers the common case, where the whole application shares one egress
+     * proxy. The token request of an Http Client Authentication configuration goes over that
+     * plugin's connection, which this setting does not cover.
      *
      * Set it only when this plugin needs a different proxy than the rest of the application.
-     * Deliberately a deployment setting and not a plugin property: a proxy sees the token request,
-     * client secret and all, so letting it be set from the admin UI would reopen the credential
-     * exfiltration path that moving [tokenBaseUrl] out of that UI closed.
+     * Deliberately a deployment setting and not a plugin property: a proxy sees every Graph request,
+     * bearer token and all, and the client secret of the deprecated login.
      */
     val proxyHost: String? = null,
     val proxyPort: Int? = null,

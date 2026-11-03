@@ -82,5 +82,19 @@ services:
     volumes:
       - ./imports/mockserver/initializerJson.json:/config/initializerJson.json
 
+  # A gateway in front of the dummy Microsoft endpoints that demands a client certificate (mTLS), see
+  # imports/mtls-gateway/nginx.conf. The sandbox sends through it by default. Its own name and port,
+  # so it doesn't collide with the gateway of the http-client-authentication-plugin sandbox (8443).
+  mtls-gateway:
+    container_name: plugin-docker-compose-graph-mail-gateway
+    image: nginx:1.30.6-alpine
+    ports:
+      - "8449:8449"
+    volumes:
+      - ./imports/mtls-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./imports/mtls-gateway/certs:/etc/nginx/certs:ro
+    depends_on:
+      - mockserver
+
 volumes:
   plugin-database-data:

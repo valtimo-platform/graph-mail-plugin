@@ -70,10 +70,14 @@ server:
 
 graph-mail:
   http:
-    # Defaults staan al op de Microsoft-endpoints; expliciet vermeld zodat zichtbaar is waar
-    # deze instellingen leven sinds ze geen pluginproperties meer zijn.
-    token-base-url: https://login.microsoftonline.com
-    graph-base-url: https://graph.microsoft.com
+    # De sandbox verstuurt via de mTLS-gateway (docker-compose service mtls-gateway) naar de
+    # dummy Microsoft Graph (mockserver). Het aanmelden staat in de Http Client Authentication-configuraties
+    # in config/plugin/graph-mail.pluginconfig.json. Voor een echte tenant: graph-base-url op
+    # https://graph.microsoft.com, GRAPH_MAIL_SANDBOX_ALLOW_NON_MICROSOFT op false en
+    # GRAPH_MAIL_SANDBOX_HTTP_CLIENT_AUTHENTICATION op de id van "Microsoft direct". Zie documentation/developer.md.
+    graph-base-url: ${GRAPH_MAIL_SANDBOX_GRAPH_BASE_URL:https://localhost:8449}
+    # Alleen voor de sandbox: de gateway is geen Microsoft-host.
+    allow-non-microsoft-endpoints: ${GRAPH_MAIL_SANDBOX_ALLOW_NON_MICROSOFT:true}
     attachment-concurrency: 8
 
 valtimo:
@@ -91,7 +95,7 @@ valtimo:
       hosts:
         - localhost
   plugin:
-    # Sleutel waarmee alle plugin-secrets (o.a. het Graph clientSecret) in de database worden
+    # Sleutel waarmee alle plugin-secrets (o.a. het client secret in de Http Client Authentication-configuraties) in de database worden
     # versleuteld; moet exact 16, 24 of 32 bytes zijn. De default hieronder is een publiek
     # bekende ontwikkelwaarde — zet in elke echte omgeving een eigen sleutel via de env var.
     encryption-secret: ${VALTIMO_PLUGIN_ENCRYPTION_SECRET:abcdefghijklmnop}

@@ -3,7 +3,9 @@ package com.ritense.valtimoplugins.graphmail
 import com.ritense.plugin.annotation.Plugin
 import com.ritense.plugin.annotation.PluginAction
 import com.ritense.plugin.annotation.PluginActionProperty
+import com.ritense.plugin.annotation.PluginEvent
 import com.ritense.plugin.annotation.PluginProperty
+import com.ritense.plugin.domain.EventType
 import com.ritense.processlink.domain.ActivityTypeWithEventName
 import com.ritense.resource.domain.MetadataType
 import com.ritense.resource.service.TemporaryResourceStorageService
@@ -216,7 +218,7 @@ internal fun resolveAttachmentFileName(metadata: Map<String, Any?>): String {
 @Plugin(
     key = "entra",
     title = "Microsoft Graph Mail Plugin",
-    description = "Send emails via Microsoft Graph API with OAuth2 (Client Credentials)",
+    description = "Send emails via Microsoft Graph API, logged in through an Http Client Authentication configuration",
 )
 class GraphMailPlugin(
     // Injected, never built here. Valtimo hydrates a fresh GraphMailPlugin per action invocation,
@@ -234,6 +236,7 @@ class GraphMailPlugin(
     private val attachmentConcurrencyLimiter: AttachmentConcurrencyLimiter = AttachmentConcurrencyLimiter(),
     // No-op when the host application has no Micrometer — see GraphMailMetrics.
     private val metrics: GraphMailMetrics = GraphMailMetrics(null),
+    private val login: GraphMailLogin,
 ) {
     private val logger = LoggerFactory.getLogger(GraphMailPlugin::class.java)
 
@@ -241,14 +244,26 @@ class GraphMailPlugin(
     // Example filter: <logger name="entra.plugin.audit" level="INFO" additivity="false">
     private val auditLogger = LoggerFactory.getLogger("entra.plugin.audit")
 
-    @PluginProperty(key = "tenantId", secret = false, required = true)
-    lateinit var tenantId: String
+    // The id of the Http Client Authentication configuration Graph Mail logs in to Microsoft with, and whose
+    // certificates it uses. A plain id rather than a category-typed property: Valtimo's own errors for those can't
+    // say what is wrong with the selection, and an optional one fails on empty (see developer.md). Optional, so
+    // configurations from 1.x keep their own login below.
+    @PluginProperty(key = AUTHENTICATION_PLUGIN_CONFIGURATION_PROPERTY, secret = false, required = false)
+    var authenticationPluginConfiguration: String? = null
 
-    @PluginProperty(key = "clientId", secret = false, required = true)
-    lateinit var clientId: String
+    // The deprecated 1.x login: only used when no Http Client Authentication configuration is selected, so that
+    // configurations from 1.x — stored, or in a *.pluginconfig.json — keep sending after an upgrade. No longer
+    // required, so a configuration with a reference can do without them.
+    @PluginProperty(key = "tenantId", secret = false, required = false)
+    var tenantId: String? = null
 
-    @PluginProperty(key = "clientSecret", secret = true, required = true)
-    lateinit var clientSecret: String
+    @PluginProperty(key = "clientId", secret = false, required = false)
+    var clientId: String? = null
+
+    // Still a secret property: Valtimo only encrypts and decrypts properties the plugin defines, so this keeps the
+    // values stored by 1.x readable, and keeps one from a *.pluginconfig.json from being stored unencrypted.
+    @PluginProperty(key = "clientSecret", secret = true, required = false)
+    var clientSecret: String? = null
 
     // Strict sender allowlist (deny-by-default): comma-separated full addresses
     // ("noreply@example.com") and/or domain entries ("@example.com"). Every send —
@@ -262,10 +277,23 @@ class GraphMailPlugin(
     @PluginProperty(key = "testSenderMailbox", secret = false, required = false)
     var testSenderMailbox: String? = null
 
-    // tokenBaseUrl, graphBaseUrl, connectTimeoutSeconds and readTimeoutSeconds used to live here as
-    // @PluginProperty fields. They are now deployment settings under `graph-mail.http` — see
-    // GraphMailHttpProperties for why an admin-editable tokenBaseUrl was a way to walk off with the
-    // client secret, and why endpoints belong to the deployment rather than to a configuration row.
+    // A login that can't be used is refused on save and deploy rather than on the first send: a configuration with
+    // neither login, an incomplete client-secret login, or a reference that can't supply a token. Not the token
+    // itself: no network calls here. A 1.x configuration passes, as it did in 1.x; it is logged as deprecated.
+    @PluginEvent(invokedOn = [EventType.CREATE, EventType.UPDATE])
+    fun checkConfiguration() {
+        login.validate(authenticationPluginConfiguration, clientSecretCredentials())
+    }
+
+    // The login of one send; refused like on save when the Http Client Authentication configuration changed since.
+    internal fun authentication(): GraphMailAuthentication =
+        login.resolve(authenticationPluginConfiguration, clientSecretCredentials())
+
+    // The deprecated client-secret login; null when none of its properties is filled in. Not trimmed, as in 1.x.
+    private fun clientSecretCredentials(): GraphCredentials? {
+        if (listOf(tenantId, clientId, clientSecret).all { it.isNullOrBlank() }) return null
+        return GraphCredentials(tenantId.orEmpty(), clientId.orEmpty(), clientSecret.orEmpty())
+    }
 
     // NOTE: SERVICE_TASK_START fires when the service task begins executing, on the
     // Operaton job-executor thread. If the surrounding transaction rolls back and retries
@@ -292,23 +320,8 @@ class GraphMailPlugin(
         @PluginActionProperty contentId: String,
         @PluginActionProperty attachmentIds: String?,
     ) {
-        // Guard against misconfigured or partially-migrated plugin instances where Valtimo
-        // failed to inject one of the required properties — gives a clear diagnostic instead
-        // of an opaque UninitializedPropertyAccessException from the lateinit field.
-        check(::tenantId.isInitialized && tenantId.isNotBlank()) {
-            "Plugin property 'tenantId' is not configured — check the Graph Mail plugin configuration"
-        }
-        check(isValidTenantId(tenantId)) {
-            "Plugin property 'tenantId' is not a usable tenant identifier — expected a directory " +
-                "GUID, a verified domain such as 'contoso.onmicrosoft.com', or 'common' / " +
-                "'organizations'. Check the Graph Mail plugin configuration"
-        }
-        check(::clientId.isInitialized && clientId.isNotBlank()) {
-            "Plugin property 'clientId' is not configured — check the Graph Mail plugin configuration"
-        }
-        check(::clientSecret.isInitialized && clientSecret.isNotBlank()) {
-            "Plugin property 'clientSecret' is not configured — check the Graph Mail plugin configuration"
-        }
+        // Guard against a configuration where Valtimo failed to inject the allowlist — gives a clear
+        // diagnostic instead of an opaque UninitializedPropertyAccessException from the lateinit field.
         check(::allowedSenders.isInitialized && allowedSenders.isNotBlank()) {
             "Plugin property 'allowedSenders' is not configured — the sender allowlist is required. " +
                 "Add the permitted sender mailboxes (or '@domain' entries) to the Graph Mail plugin configuration"
@@ -390,17 +403,14 @@ class GraphMailPlugin(
                 val auditStart = System.currentTimeMillis()
                 var attachments: List<ResolvedAttachment> = emptyList()
                 try {
+                    // Inside the try, so a login that can't be used is audited like any other failed send.
+                    val authentication = authentication()
                     // Only attachment-carrying sends queue for a slot; plain sends are unbounded
                     // because their memory footprint is negligible.
                     attachmentConcurrencyLimiter.withPermit(attachmentIdList.isNotEmpty()) {
                         attachments = resolveAttachments(attachmentIdList.ifEmpty { null })
                         client.sendMail(
-                            credentials =
-                                GraphCredentials(
-                                    tenantId = tenantId,
-                                    clientId = clientId,
-                                    clientSecret = clientSecret,
-                                ),
+                            authentication = authentication,
                             mail =
                                 OutboundMail(
                                     senderMailbox = senderMailbox,
@@ -488,17 +498,14 @@ class GraphMailPlugin(
     // design decision, not something this plugin should impose — see documentation/developer.md.
     private fun retryVerdictOf(ex: Throwable): String =
         when (ex) {
+            is GraphMailCertificateException ->
+                "CERTIFICATES — the certificates could not be loaded or the gateway rejected them; check the " +
+                    "Http Client Authentication configuration named in the error"
             is IllegalArgumentException, is IllegalStateException ->
                 "PERMANENT_INPUT — retrying will fail identically; correct the process data or the plugin configuration"
-            // Before GraphMailPermanentException: this one is thrown for a 401 that survived a forced
-            // token refresh, which is the single most common "grant the permission" case there is, and
-            // it does not extend GraphMailPermanentException — so without its own branch it fell all
-            // the way through to UNCLASSIFIED.
-            is GraphMailTokenExpiredException ->
-                "PERMANENT_REMOTE — the token was rejected even after a refresh; grant Mail.Send as an " +
-                    "application permission and give it admin consent"
             is GraphMailPermanentException ->
-                "PERMANENT_REMOTE — Graph rejected this permanently; a configuration or permission change is required"
+                "PERMANENT_REMOTE — the token endpoint, Graph or the proxy rejected this permanently; a " +
+                    "configuration or permission change is required"
             is GraphMailUnknownOutcomeException ->
                 "UNKNOWN — the message MAY have been sent; verify the mailbox before re-running this activity"
             is GraphMailRetryableException ->

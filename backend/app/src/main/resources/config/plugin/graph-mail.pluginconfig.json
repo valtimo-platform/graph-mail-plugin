@@ -1,15 +1,75 @@
 [
   {
+    "id": "9a3e2b10-5c4d-4e8f-a1b2-c3d4e5f60001",
+    "title": "Graph login via gateway",
+    "pluginDefinitionKey": "http-client-authentication",
+    "properties": {
+      "authenticationType": "TOKEN_EXCHANGE",
+      "tokenEndpoint": "https://127.0.0.1:8449/00000000-0000-0000-0000-000000000001/oauth2/v2.0/token",
+      "clientId": "00000000-0000-0000-0000-000000000002",
+      "clientSecret": "dummy-client-secret",
+      "scope": "https://graph.microsoft.com/.default",
+      "serverCertificate": "-----BEGIN CERTIFICATE-----\nMIIDMzCCAhugAwIBAgIUZMFLHwxQVQ3Q3ztEohkPvSPIpiEwDQYJKoZIhvcNAQEL\nBQAwKDEmMCQGA1UEAwwdR3JhcGggTWFpbCBzYW5kYm94IGdhdGV3YXkgQ0EwIBcN\nMjYxMDI4MTEyNzMxWhgPMjEyNjEwMDQxMTI3MzFaMCgxJjAkBgNVBAMMHUdyYXBo\nIE1haWwgc2FuZGJveCBnYXRld2F5IENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A\nMIIBCgKCAQEA3iGafzuMgi46shJkpdxPgy2zU73BjIG8qeEkI+27LWmAtZTBhiUr\n4n4j3+HuVZD4xkWyHCso5BgdOfMN2zu8IYK0095NmAAqaMHz4YC6lIixJcV01Qnm\nkUofkPgAUdRnPyDDWapdPY/yr4qiBNveW0WiDcrbxbW8Jz/mMrsvBmTb57v8G0/1\n1wVoQdVvLXyevRQglkeR4shIZGCIehe8ofueLxpKPa6ucVv/iGbl4+/fMxnRW5C5\ns9HcY/I4L/JmbwGYeCOJvJ06UFCuu30f1SM+qHg9G70KCJ8RviSQK1VBF/dsrLfE\nFUqnzfUVlkekzjMtYxhcXsgMMxHwSjmDiwIDAQABo1MwUTAdBgNVHQ4EFgQU2nzD\nvvRzJy8eqT8E9p/vT/Sx23kwHwYDVR0jBBgwFoAU2nzDvvRzJy8eqT8E9p/vT/Sx\n23kwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAs+cjZ6iTEZ8i\nZuwOQac0Ov/Z7kgT46/l8kKprJZ9rMSV5xkKO4iZziqACb3Ttkvs9ttfmIqF4apv\n6jjZNRBtxPlfhNcmxM9Cb16F7E7PdXKehSyEm9H/pHVzAw1a90emMxOLqpgcOD/U\nciAQyiIkDQ8GFIbWeqp11V6GQ3hp/Jc3jPpOBeqwJX6VIx44x1Be62hM2pbGXRwE\nDc0zG4tCfaIBim3hgLgowpLfT9g3kIoKuxpkx+MARW5Z//WMKk+8QPhqUt3BZkYC\n9osT+BOqatEQuAspKSW7cR8yv/n9YXfmgdpqffHwmWFWlv4390HTWhwQC1b/FQG9\nxqFVKAtiJw==\n-----END CERTIFICATE-----\n",
+      "clientCertificate": "-----BEGIN CERTIFICATE-----\nMIIDSzCCAjOgAwIBAgIUdtI2VkNMhFblaOl+O89hYIZNU8MwDQYJKoZIhvcNAQEL\nBQAwKDEmMCQGA1UEAwwdR3JhcGggTWFpbCBzYW5kYm94IGdhdGV3YXkgQ0EwIBcN\nMjYxMDI4MTEyNzMyWhgPMjEyNjEwMDQxMTI3MzJaMCQxIjAgBgNVBAMMGWdyYXBo\nLW1haWwtc2FuZGJveC1jbGllbnQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEK\nAoIBAQCgudwppb8Z3+YJlEZM8it+XMZhDYuQ4PI1CiP2zXEpOLfVRegeqQq4IW0J\nh4BJkc+qvmLLY040mW3pnDnHYjN4gMh7pZ8VUmM34YZ1Hfz+4eE66HB0ET+SUHCI\naZWHiTIbzkavpXuPntWr4sTX8ea3pXfHxmSf+KqkuW4SlhlqbsLys1ibcHAGM9WF\nWqtVw/NF6BsdZgHANJYk6D/Bi71hL72ccZk5yIZTfMy/k5hj6JQpe3fXth4bUtf1\ne9aaIZxZ6JQBdfK3oVgEQThpfzZgy8GWpI+XBIzTM9UiEmQDbYEjcxGbOgN1gCmG\nqVaiZwbpPvWMz27pScOXPAmwBjqRAgMBAAGjbzBtMAkGA1UdEwQCMAAwCwYDVR0P\nBAQDAgWgMBMGA1UdJQQMMAoGCCsGAQUFBwMCMB0GA1UdDgQWBBQw9IeynHlXU51b\nLYnizqmkKDArFzAfBgNVHSMEGDAWgBTafMO+9HMnLx6pPwT2n+9P9LHbeTANBgkq\nhkiG9w0BAQsFAAOCAQEANX2NwNqZCuYwnJIvNXpEvM6s6i8wUiYmWIcrc4PzCwLe\nYdL3eq1nSFR6sWQiSt6E50v0P1uBGaYJZtGA6RC8xWImWZkFIhbRWv7MsOsTZl3L\nB+MAiT9FcAxHb4lCOI1wWv7SCisNOlZG1CKu5+5xFutI8ehkse1FQAAL47UZv0+g\n3VAME1Av7VETDvsqZ7FHAH1pIT8hcXzgtAXjru7fMkrmAB5f/FjqGWfeOXI0mcpM\nM7OcMpuWFmMaBhr+8vm6YeS5oAZTo+LIK2a0gPk4kkpRwPJrHcgdXgQguTHORGyT\n33A8y2y45iLBPQmQ+Nf0anfbSdBPlk4GXwg8fufUiw==\n-----END CERTIFICATE-----\n",
+      "clientPrivateKey": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCgudwppb8Z3+YJ\nlEZM8it+XMZhDYuQ4PI1CiP2zXEpOLfVRegeqQq4IW0Jh4BJkc+qvmLLY040mW3p\nnDnHYjN4gMh7pZ8VUmM34YZ1Hfz+4eE66HB0ET+SUHCIaZWHiTIbzkavpXuPntWr\n4sTX8ea3pXfHxmSf+KqkuW4SlhlqbsLys1ibcHAGM9WFWqtVw/NF6BsdZgHANJYk\n6D/Bi71hL72ccZk5yIZTfMy/k5hj6JQpe3fXth4bUtf1e9aaIZxZ6JQBdfK3oVgE\nQThpfzZgy8GWpI+XBIzTM9UiEmQDbYEjcxGbOgN1gCmGqVaiZwbpPvWMz27pScOX\nPAmwBjqRAgMBAAECggEAGDWWp4FLRSr3++ZlJm7txTVVPkYriRGQ+hNCcojkbCia\nbBoBCik9L5n9Uguic7JuXNIbkHYvT/XyW9dHzrQIe7SuPg2m5i/IOSETvy1ar8u3\nQMfFNH5qnG/YW3vH5afxL8YE2K0s7OeoWKEqNDrAHVZjseg8vOnYTkKOBWetgV3b\nhm0/kDN2wlRPWY0ODFcdo0JVY7PlQ9EC4EbAq4i2CYSCLygAvAk+8KpJi97ZOStU\nvS99h97DPvtQlGiFoexx9FKl1LEO38+eb1F0R/ZbUd5RFqkJ4kia/BvVH/2z6Eaw\nLGkCcF3fEs5Pp/pkkhvDLJwwImri2WkFGt3HHw+dJwKBgQDQvyupBmoVq/oC8S8P\nZQcODzMvCUwPwMlWNbWuYe+9eL+q8G8BQSQrt3IA2K/r6LTYTD5MzRCOlt4nOKE8\nrE5FhZfxLCnGaACvZhfnmJEhNIjaIxCEZFW6JkBKvkhRI8GC1YgX3qoHGfyVqQkk\nrLuaf2Br0cWnP+2vMYTdk465swKBgQDFG+XS5Dy5F4loNEjfSq7dtZKpF45Y9c2z\nRyjlamnlD6XNJ1FeYq78uHWIQD68ZA4lX4jZQ8UhnnPLSZ3t7Z22X5mLG8LUNMzA\nc7zLo1yaVZHH+2nPcH68Wr9ooRmZxBoyr9zscvFhLmtHdXoB1ynaitjTi/6pHhNc\nyvzk5xcQqwKBgAUyvYOYBUxE3BT2rJVVjrdq6XtiX+KEin77F2sgRTgSqbM4CYue\nc6gjCVO8EaVuRhKc03BWKvNiDmYrotg/8jMJAJ+g2el27Y1wnWfHBNYu2LmV5fNm\nDDx2d2NlGafrnAYGCz2M7e7/VqrjarbfFkzinyQQNTvU+7ZBJW3fHs7BAoGBAKBQ\nY2lWVwkX2ptVQxvRi04p2wIKda1nJom0y89j8ILsaibk3qpMyxQjFvzde+kP2+2L\nuSs0koYYcQebdYbJp2doc+KPjrO3yfyRZbGeybeA91PW6SVd0sZxbJK1zLOiqsgk\n/yOVDTvEXF6/bp9Gl/T2zwmoKFT2cDsdofiu97SHAoGBALDWMjRyKiuqiYmUcNqZ\nFnHX683rnoUSFgb+TfouLQD5W87v8ixBW1phVVbVDYgauuDRf7TZ2buhxhQkC5EE\nQ64sFMh/h65uDNxnj52JMsTlofOB70DymGaDvyYMJHRRQRVmjkK9iqZiM3jbHaYv\n44GgBz9hEzxx93AiEumYNTPq\n-----END PRIVATE KEY-----\n"
+    }
+  },
+  {
+    "id": "9a3e2b10-5c4d-4e8f-a1b2-c3d4e5f60002",
+    "title": "Graph login without client certificate",
+    "pluginDefinitionKey": "http-client-authentication",
+    "properties": {
+      "authenticationType": "TOKEN_EXCHANGE",
+      "tokenEndpoint": "https://127.0.0.1:8449/00000000-0000-0000-0000-000000000001/oauth2/v2.0/token",
+      "clientId": "00000000-0000-0000-0000-000000000002",
+      "clientSecret": "dummy-client-secret",
+      "scope": "https://graph.microsoft.com/.default",
+      "serverCertificate": "-----BEGIN CERTIFICATE-----\nMIIDMzCCAhugAwIBAgIUZMFLHwxQVQ3Q3ztEohkPvSPIpiEwDQYJKoZIhvcNAQEL\nBQAwKDEmMCQGA1UEAwwdR3JhcGggTWFpbCBzYW5kYm94IGdhdGV3YXkgQ0EwIBcN\nMjYxMDI4MTEyNzMxWhgPMjEyNjEwMDQxMTI3MzFaMCgxJjAkBgNVBAMMHUdyYXBo\nIE1haWwgc2FuZGJveCBnYXRld2F5IENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A\nMIIBCgKCAQEA3iGafzuMgi46shJkpdxPgy2zU73BjIG8qeEkI+27LWmAtZTBhiUr\n4n4j3+HuVZD4xkWyHCso5BgdOfMN2zu8IYK0095NmAAqaMHz4YC6lIixJcV01Qnm\nkUofkPgAUdRnPyDDWapdPY/yr4qiBNveW0WiDcrbxbW8Jz/mMrsvBmTb57v8G0/1\n1wVoQdVvLXyevRQglkeR4shIZGCIehe8ofueLxpKPa6ucVv/iGbl4+/fMxnRW5C5\ns9HcY/I4L/JmbwGYeCOJvJ06UFCuu30f1SM+qHg9G70KCJ8RviSQK1VBF/dsrLfE\nFUqnzfUVlkekzjMtYxhcXsgMMxHwSjmDiwIDAQABo1MwUTAdBgNVHQ4EFgQU2nzD\nvvRzJy8eqT8E9p/vT/Sx23kwHwYDVR0jBBgwFoAU2nzDvvRzJy8eqT8E9p/vT/Sx\n23kwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAs+cjZ6iTEZ8i\nZuwOQac0Ov/Z7kgT46/l8kKprJZ9rMSV5xkKO4iZziqACb3Ttkvs9ttfmIqF4apv\n6jjZNRBtxPlfhNcmxM9Cb16F7E7PdXKehSyEm9H/pHVzAw1a90emMxOLqpgcOD/U\nciAQyiIkDQ8GFIbWeqp11V6GQ3hp/Jc3jPpOBeqwJX6VIx44x1Be62hM2pbGXRwE\nDc0zG4tCfaIBim3hgLgowpLfT9g3kIoKuxpkx+MARW5Z//WMKk+8QPhqUt3BZkYC\n9osT+BOqatEQuAspKSW7cR8yv/n9YXfmgdpqffHwmWFWlv4390HTWhwQC1b/FQG9\nxqFVKAtiJw==\n-----END CERTIFICATE-----\n"
+    }
+  },
+  {
+    "id": "9a3e2b10-5c4d-4e8f-a1b2-c3d4e5f60003",
+    "title": "Graph login, untrusted client certificate",
+    "pluginDefinitionKey": "http-client-authentication",
+    "properties": {
+      "authenticationType": "TOKEN_EXCHANGE",
+      "tokenEndpoint": "http://127.0.0.1:1080/00000000-0000-0000-0000-000000000001/oauth2/v2.0/token",
+      "clientId": "00000000-0000-0000-0000-000000000002",
+      "clientSecret": "dummy-client-secret",
+      "scope": "https://graph.microsoft.com/.default",
+      "serverCertificate": "-----BEGIN CERTIFICATE-----\nMIIDMzCCAhugAwIBAgIUZMFLHwxQVQ3Q3ztEohkPvSPIpiEwDQYJKoZIhvcNAQEL\nBQAwKDEmMCQGA1UEAwwdR3JhcGggTWFpbCBzYW5kYm94IGdhdGV3YXkgQ0EwIBcN\nMjYxMDI4MTEyNzMxWhgPMjEyNjEwMDQxMTI3MzFaMCgxJjAkBgNVBAMMHUdyYXBo\nIE1haWwgc2FuZGJveCBnYXRld2F5IENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A\nMIIBCgKCAQEA3iGafzuMgi46shJkpdxPgy2zU73BjIG8qeEkI+27LWmAtZTBhiUr\n4n4j3+HuVZD4xkWyHCso5BgdOfMN2zu8IYK0095NmAAqaMHz4YC6lIixJcV01Qnm\nkUofkPgAUdRnPyDDWapdPY/yr4qiBNveW0WiDcrbxbW8Jz/mMrsvBmTb57v8G0/1\n1wVoQdVvLXyevRQglkeR4shIZGCIehe8ofueLxpKPa6ucVv/iGbl4+/fMxnRW5C5\ns9HcY/I4L/JmbwGYeCOJvJ06UFCuu30f1SM+qHg9G70KCJ8RviSQK1VBF/dsrLfE\nFUqnzfUVlkekzjMtYxhcXsgMMxHwSjmDiwIDAQABo1MwUTAdBgNVHQ4EFgQU2nzD\nvvRzJy8eqT8E9p/vT/Sx23kwHwYDVR0jBBgwFoAU2nzDvvRzJy8eqT8E9p/vT/Sx\n23kwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAs+cjZ6iTEZ8i\nZuwOQac0Ov/Z7kgT46/l8kKprJZ9rMSV5xkKO4iZziqACb3Ttkvs9ttfmIqF4apv\n6jjZNRBtxPlfhNcmxM9Cb16F7E7PdXKehSyEm9H/pHVzAw1a90emMxOLqpgcOD/U\nciAQyiIkDQ8GFIbWeqp11V6GQ3hp/Jc3jPpOBeqwJX6VIx44x1Be62hM2pbGXRwE\nDc0zG4tCfaIBim3hgLgowpLfT9g3kIoKuxpkx+MARW5Z//WMKk+8QPhqUt3BZkYC\n9osT+BOqatEQuAspKSW7cR8yv/n9YXfmgdpqffHwmWFWlv4390HTWhwQC1b/FQG9\nxqFVKAtiJw==\n-----END CERTIFICATE-----\n",
+      "clientCertificate": "-----BEGIN CERTIFICATE-----\nMIIDVzCCAj+gAwIBAgIUIRdwoKqQiHYjoxCu7ub8AM6w/CIwDQYJKoZIhvcNAQEL\nBQAwKjEoMCYGA1UEAwwfR3JhcGggTWFpbCBzYW5kYm94IHVudHJ1c3RlZCBDQTAg\nFw0yNjEwMjgxMTI3MzJaGA8yMTI2MTAwNDExMjczMlowLjEsMCoGA1UEAwwjZ3Jh\ncGgtbWFpbC1zYW5kYm94LXVudHJ1c3RlZC1jbGllbnQwggEiMA0GCSqGSIb3DQEB\nAQUAA4IBDwAwggEKAoIBAQDP9dsiw4ZQWfgGGEBjk/X8RdQMan0CBbHpfDGkUOWF\nv812Swm0llf8b7tRiFzy78A2isqSqNklOvnrWFzC1vrubdOBq2LbU0uFkHszP/JN\nZpLvrayyh+dcbOW5N+ZKw7uepP56dMYLfhQ/6SQtOopkYxPR1jftyLw6cU3k/MQ4\nZCrBKrkucxJwkD9IaeVSlNP+2algw9fNXRSnsK5UXNCcLoX8eXBHENbrPB7cWldj\n63YTBukFGseyV0ToQfvdKH7cJ1qTxGJzgl2r8Rwyp5GiDpnH45VeV38Ii5iDOboQ\n2WlTVP4dPRyZEsLDlIzi8ZMopYnexc+rPTf3iH4zmEMnAgMBAAGjbzBtMAkGA1Ud\nEwQCMAAwCwYDVR0PBAQDAgWgMBMGA1UdJQQMMAoGCCsGAQUFBwMCMB0GA1UdDgQW\nBBTE8ywmhCRrXVa4T7+Rcpvd1UK/XTAfBgNVHSMEGDAWgBT8j2a5elXEz1aiDm3w\nzlY0A8DREjANBgkqhkiG9w0BAQsFAAOCAQEAWMd18QSF5KjGqd7Q9gVIuVyPEJSt\nFQqNeCC5f9shap34XfkT7N95pP4aBlv3pYBmyBJeaWDfil7GkIOLOzbCBYFhs0Fl\n4p9+QHRqTUqvWShcDfXqNInu1DRVsZ5wr3NfHvj6GLjjyW+4gDVBupwS+vfvjR4M\nbLRauqIPjCgxwVFNAsshtYdPF9ZHsL5MAuuhaMOlKcq/DAsxHfxwd5LVUueC9XFt\n8PqoR2vaGKudokpThf0Ti+VyFxqlGPqhFq6o0SlFPSHnFkKt0H8eN1UUeeN6/oqd\nBCy/VvPrpVfngHQJhG02s0TbjvsqJlrgAHxUk6bck1Tk1tXJsvSFLz+mmw==\n-----END CERTIFICATE-----\n",
+      "clientPrivateKey": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDP9dsiw4ZQWfgG\nGEBjk/X8RdQMan0CBbHpfDGkUOWFv812Swm0llf8b7tRiFzy78A2isqSqNklOvnr\nWFzC1vrubdOBq2LbU0uFkHszP/JNZpLvrayyh+dcbOW5N+ZKw7uepP56dMYLfhQ/\n6SQtOopkYxPR1jftyLw6cU3k/MQ4ZCrBKrkucxJwkD9IaeVSlNP+2algw9fNXRSn\nsK5UXNCcLoX8eXBHENbrPB7cWldj63YTBukFGseyV0ToQfvdKH7cJ1qTxGJzgl2r\n8Rwyp5GiDpnH45VeV38Ii5iDOboQ2WlTVP4dPRyZEsLDlIzi8ZMopYnexc+rPTf3\niH4zmEMnAgMBAAECggEAUrMEmAiFS0Lb/SB7yp22fsIOF3npiHpXS/CVlTCOdefW\nfypMC8KV7s9IAJ5nyDxLheUftb7ry4BujoavLNRtKZAHQlOzlmDDcbQJKlJNuzYF\nTMcWHFErUngDyupN7IF2BRq8EFqLv1o+F0RRnKLhEhbMdO/pgegH4n3Yai2SopGL\nPVvGPCHkAIFXURRya6vbuOhyEBhYeCeBtowsHbBhEWQF3WjdB7MN0KpVkRRtdk1a\n0ZGV5EAighCBS75oyFm1g4mBlHsxKxBr1RhSHaWPYnRmqQ0Gb1oZEpfAr1GwZU43\nB84K0NgaJIOGOsrhECbQ0NhR682IndDi8nMxTIyzAQKBgQDwO9TZ7bveIWouJVMY\n//Y3JkbPTE7cpfseyy0RdT768O2kHRWysLEPs7hsDlbO1qPlSrRF39mOfd51liRa\nfIluxyVx6N3kZlRzOTue/BEF20N7vB6Q5q7lex/4IZQA5HVaOU7FJqs/YkhdMEnD\nNL0tlqSJqF/86fPtOIldwU4FwQKBgQDdm8zFOTW4Q4twc+Sl7zDwIp2gsLF7yZNo\nyWt7TH9i9hyQrvnd6xWkF/FWZfOsmBifHVgpt/J6HJK1dwNH2Hk1FPVJFm6ZfmFq\n2wZbio5S9jM1LI+bQyQbTczg7Qc5/6HrU7ttF/A7MR3I0jSmF6mmqLj5GYEvbdZW\nwYeMGymS5wKBgEDbFkrDeM2uXbkZkIaWS8V1yvYaFsxQ7yvQFFm7OoaK1s1QoNP+\nCb9AeNCLSnpKzjKP6X1XwqdKae163FOlfYDvuLc48/a+fZwh3mu8h2f6Wwyjq+jY\nrmz7wZS+k/NtuhTildZ56w+QnBK0f6V4rn4JRmB3mXpxOs5XThaGombBAoGBAI9l\nbDhGT6t/EXBfnZl90BXi4EqFayMliVwp0YHEOz2m8U7x2j8uCh/XWlPEvst006HK\nFC1SmPVJHemMLDRGMBAYEqwLdt+dtp21QkTjwDqQkwwaXIZkCK4eRq9Y0O9Hqdej\no8jwz4MNwi8bTfQXpbBwxthxF3XARgx3SCVxwhILAoGBAKqSASUmHSxCqsEWTPKB\n81V504QEPnH1fcvr5/iDy09zWC6n0FpHjax7+yNJN6VzDz+5v0F6e2RONRBgDbQV\nSBFVcdyZ/1eXCkmDDh/BW4e8yOdSeAng+6JrjNUTQhnp1ibh7s7XBHPvPH5CIEXb\nXc4ugPqmfKOGl1xrpHmc8/3r\n-----END PRIVATE KEY-----\n"
+    }
+  },
+  {
+    "id": "9a3e2b10-5c4d-4e8f-a1b2-c3d4e5f60004",
+    "title": "Not a Graph login",
+    "pluginDefinitionKey": "http-client-authentication",
+    "properties": {
+      "authenticationType": "NONE"
+    }
+  },
+  {
+    "id": "9a3e2b10-5c4d-4e8f-a1b2-c3d4e5f60005",
+    "title": "Microsoft direct",
+    "pluginDefinitionKey": "http-client-authentication",
+    "properties": {
+      "authenticationType": "TOKEN_EXCHANGE",
+      "tokenEndpoint": "https://login.microsoftonline.com/${GRAPH_MAIL_TENANT_ID:00000000-0000-0000-0000-000000000001}/oauth2/v2.0/token",
+      "clientId": "${GRAPH_MAIL_CLIENT_ID:00000000-0000-0000-0000-000000000002}",
+      "clientSecret": "${GRAPH_MAIL_CLIENT_SECRET:dummy-client-secret}",
+      "scope": "https://graph.microsoft.com/.default"
+    }
+  },
+  {
     "id": "4d1c8f5e-6b21-4a7f-9c3d-8e0a1b2c3d4e",
     "title": "Graph Mail (dummy)",
     "pluginDefinitionKey": "entra",
     "properties": {
-      "tenantId": "${GRAPH_MAIL_TENANT_ID:00000000-0000-0000-0000-000000000001}",
-      "clientId": "${GRAPH_MAIL_CLIENT_ID:00000000-0000-0000-0000-000000000002}",
-      "clientSecret": "${GRAPH_MAIL_CLIENT_SECRET:dummy-client-secret}",
-      "testSenderMailbox": "${GRAPH_MAIL_SENDER:noreply@example.com}",
-      "tokenBaseUrl": "${GRAPH_MAIL_TOKEN_BASE_URL:http://localhost:1080}",
-      "graphBaseUrl": "${GRAPH_MAIL_BASE_URL:http://localhost:1080}"
+      "authenticationPluginConfiguration": "${GRAPH_MAIL_SANDBOX_HTTP_CLIENT_AUTHENTICATION:9a3e2b10-5c4d-4e8f-a1b2-c3d4e5f60001}",
+      "allowedSenders": "${GRAPH_MAIL_ALLOWED_SENDERS:@example.com}",
+      "testSenderMailbox": "${GRAPH_MAIL_SENDER:noreply@example.com}"
     }
   }
 ]

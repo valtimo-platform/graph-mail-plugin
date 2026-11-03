@@ -13,24 +13,15 @@ const graphMailPluginSpecification: PluginSpecification = {
   pluginTranslations: {
     nl: {
       title: 'Microsoft Graph Mail',
-      description: 'Verstuur e-mails via Microsoft Graph API met OAuth2',
+      description: 'Verstuur e-mails via Microsoft Graph API, aangemeld via een Http Client Authentication-configuratie',
       configurationTitle: 'Configuratienaam',
       'send-email': 'Verstuur e-mail',
-      tenantId: 'Tenant ID',
-      clientId: 'Client ID',
-      clientSecret: 'Client Secret',
       allowedSenders: 'Toegestane afzenders (whitelist, verplicht)',
       allowedSendersTooltip: 'Komma-gescheiden lijst van toegestane afzendermailboxen, bijv. noreply@gemeente.nl, zaken@gemeente.nl. Een heel domein toestaan kan met @gemeente.nl. E-mails met een afzender buiten deze lijst worden geweigerd.',
       allowedSendersInvalidFormat: 'Elke entry moet een geldig e-mailadres zijn (noreply@gemeente.nl) of een domein beginnend met @ (@gemeente.nl), gescheiden door komma’s.',
       testSenderMailbox: 'Afzender testmail (e-mailadres)',
-      tenantIdInvalidFormat: 'Tenant ID moet een geldig UUID zijn (bijv. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).',
-      clientIdInvalidFormat: 'Client ID moet een geldig UUID zijn (bijv. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).',
-      clientSecretPlaceholder: '(ongewijzigd laten als leeg)',
-      allowedSendersChangeRequiresSecret:
-        'Je wijzigt de lijst met toegestane afzenders. Die lijst bepaalt namens welke mailboxen ' +
-        'deze plugin mag versturen, dus vul het client secret opnieuw in om de wijziging op te slaan.',
       testMailTitle: 'Testmail versturen',
-      testMailDescription: 'Verstuur een testmail met voorbeelddata (Pietje van Patje) om te valideren of de credentials werken en e-mail kan worden verstuurd via Microsoft Graph.',
+      testMailDescription: 'Verstuur een testmail met voorbeelddata (Pietje van Patje) om te valideren of het aanmelden werkt en e-mail kan worden verstuurd via Microsoft Graph.',
       testMailSaveFirst: 'Sla de configuratie eerst op voordat je een testmail verstuurt.',
       testMailConfigAmbiguous: 'Kan deze configuratie niet eenduidig herleiden — er bestaan meerdere Graph Mail-configuraties met dezelfde titel. Geef de configuratie een unieke naam en sla opnieuw op voordat je een testmail verstuurt.',
       invalidEmailAddress: 'Ongeldig e-mailadres',
@@ -52,27 +43,42 @@ const graphMailPluginSpecification: PluginSpecification = {
       senderMailboxPlaceholder: 'bijv. noreply@gemeente.nl',
       testRecipientPlaceholder: 'bijv. beheerder@gemeente.nl',
       connectionErrorFallback: 'Verbindingsfout',
-    },
-    en: {
-      title: 'Microsoft Graph Mail',
-      description: 'Send emails via Microsoft Graph API using OAuth2',
-      configurationTitle: 'Configuration name',
-      'send-email': 'Send email',
+      authenticationPluginConfiguration: 'Http Client Authentication-configuratie (aanbevolen)',
+      authenticationPluginConfigurationTooltip:
+        'Hiermee meldt Graph Mail zich aan bij Microsoft, of bij een gateway daartussen.',
+      authenticationPluginConfigurationEmpty: 'Aanmelden met client secret',
+      authenticationPluginConfigurationNone:
+        'Er zijn geen Http Client Authentication-configuraties. Maak er eerst een aan.',
+      authenticationPluginConfigurationMissing:
+        'De gekozen configuratie bestaat niet meer of is niet beschikbaar. Kies een andere om op te kunnen slaan.',
+      authenticationPluginConfigurationUnknown: 'Onbekende configuratie',
+      loginNotTokenExchange: 'kies authenticatietype Token exchange om bij Microsoft aan te melden.',
+      loginHasAudience: 'laat Audience leeg: Microsoft Entra ID doet alleen client credentials, geen token exchange.',
+      loginWithoutScope: 'vul Scope in, bijvoorbeeld https://graph.microsoft.com/.default.',
+      clientSecretLogin: 'Aanmelden met client secret (verouderd)',
+      clientSecretLoginDeprecated:
+        'Zonder Http Client Authentication-configuratie meldt Graph Mail zich aan met de Tenant ID, Client ID en ' +
+        'Client Secret hieronder, zoals in versie 1.0. Dat blijft werken, maar verdwijnt in een volgende major versie: ' +
+        'kies hierboven een Http Client Authentication-configuratie om over te stappen.',
       tenantId: 'Tenant ID',
       clientId: 'Client ID',
       clientSecret: 'Client Secret',
+      tenantIdInvalidFormat:
+        'Tenant ID moet een directory-GUID, een geverifieerd domein (contoso.onmicrosoft.com) of ' +
+        '\'organizations\' zijn, zonder spaties of / ? # \\ @.',
+      clientSecretPlaceholder: '(ongewijzigd laten als leeg)',
+    },
+    en: {
+      title: 'Microsoft Graph Mail',
+      description: 'Send emails via Microsoft Graph API, logged in through an Http Client Authentication configuration',
+      configurationTitle: 'Configuration name',
+      'send-email': 'Send email',
       allowedSenders: 'Allowed senders (whitelist, required)',
       allowedSendersTooltip: 'Comma-separated list of permitted sender mailboxes, e.g. noreply@organisation.gov, cases@organisation.gov. Allow an entire domain with @organisation.gov. Emails with a sender outside this list are rejected.',
       allowedSendersInvalidFormat: 'Each entry must be a valid email address (noreply@organisation.gov) or a domain starting with @ (@organisation.gov), separated by commas.',
       testSenderMailbox: 'Test sender mailbox (email address)',
-      tenantIdInvalidFormat: 'Tenant ID must be a valid UUID (e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).',
-      clientIdInvalidFormat: 'Client ID must be a valid UUID (e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).',
-      clientSecretPlaceholder: '(leave blank to keep unchanged)',
-      allowedSendersChangeRequiresSecret:
-        'You are changing the list of allowed senders. That list controls which mailboxes this ' +
-        'plugin may send as, so enter the client secret again to save the change.',
       testMailTitle: 'Send test email',
-      testMailDescription: 'Send a test email with sample data (John Doe) to validate that the credentials work and email can be sent via Microsoft Graph.',
+      testMailDescription: 'Send a test email with sample data (John Doe) to validate that the login works and email can be sent via Microsoft Graph.',
       testMailSaveFirst: 'Save the configuration first before sending a test email.',
       testMailConfigAmbiguous: 'Cannot uniquely resolve this configuration — multiple Graph Mail configurations share the same title. Give this configuration a unique name and save again before sending a test email.',
       invalidEmailAddress: 'Invalid email address',
@@ -94,6 +100,30 @@ const graphMailPluginSpecification: PluginSpecification = {
       senderMailboxPlaceholder: 'e.g. noreply@organisation.gov',
       testRecipientPlaceholder: 'e.g. admin@organisation.gov',
       connectionErrorFallback: 'Connection error',
+      authenticationPluginConfiguration: 'Http Client Authentication configuration (recommended)',
+      authenticationPluginConfigurationTooltip:
+        'Graph Mail uses this to log in to Microsoft, or to a gateway in between.',
+      authenticationPluginConfigurationEmpty: 'Log in with client secret',
+      authenticationPluginConfigurationNone:
+        'There are no Http Client Authentication configurations. Create one first.',
+      authenticationPluginConfigurationMissing:
+        'The selected configuration no longer exists or is not available. Select another one to save.',
+      authenticationPluginConfigurationUnknown: 'Unknown configuration',
+      loginNotTokenExchange: 'select authentication type Token exchange to log in to Microsoft.',
+      loginHasAudience: 'leave Audience empty: Microsoft Entra ID only does client credentials, not a token exchange.',
+      loginWithoutScope: 'fill in Scope, e.g. https://graph.microsoft.com/.default.',
+      clientSecretLogin: 'Log in with client secret (deprecated)',
+      clientSecretLoginDeprecated:
+        'Without an Http Client Authentication configuration, Graph Mail logs in with the Tenant ID, Client ID and ' +
+        'Client Secret below, as in version 1.0. That keeps working, but will be removed in a future major version: ' +
+        'select an Http Client Authentication configuration above to migrate.',
+      tenantId: 'Tenant ID',
+      clientId: 'Client ID',
+      clientSecret: 'Client Secret',
+      tenantIdInvalidFormat:
+        'Tenant ID must be a directory GUID, a verified domain (contoso.onmicrosoft.com) or ' +
+        '\'organizations\', without spaces or / ? # \\ @.',
+      clientSecretPlaceholder: '(leave blank to keep unchanged)',
     },
   },
 };

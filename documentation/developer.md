@@ -9,6 +9,8 @@ Voor het inrichten van de plugin via de beheerinterface: zie [handleiding.md](ha
 - Java 17+
 - Node.js >= 20, < 23
 - Valtimo 13.x
+- Http Client Authentication 3.1.1 of hoger, als Graph Mail zich daarmee aanmeldt (aanbevolen;
+  backend en frontend zelf toevoegen, Graph Mail brengt het niet mee)
 - Azure App Registration met een client secret (*Certificates & secrets*) en de
   applicatiemachtigingen:
   - `Mail.Send` — vereist voor alle e-mailverzendingen
@@ -68,23 +70,59 @@ npx ng build @valtimo-plugins/graph-mail
 ## Lokaal testen zonder Azure-tenant
 
 De ontwikkel-stack bevat een **dummy Microsoft Graph** (MockServer, poort 1080) die zowel
-`login.microsoftonline.com` als `graph.microsoft.com` nabootst. Daarmee kun je de plugin
-end-to-end draaien zonder App Registration.
+`login.microsoftonline.com` als `graph.microsoft.com` nabootst, met daarvoor een **gateway die een
+clientcertificaat eist** (nginx, `https://localhost:8449`). Daarmee kun je de plugin end-to-end
+draaien zonder App Registration, zoals bij een organisatie met zo'n gateway.
+
+Graph Mail meldt zich aan via `http-client-authentication` 3.1.1. Zolang die versie niet op Maven
+Central en npm staat:
+
+1. Backend: draai `./gradlew :backend:plugin:publishToMavenLocal` in de repository van die plugin. Graph
+   Mail zoekt eerst in `mavenLocal()`; verwijder
+   `~/.m2/repository/com/ritense/valtimoplugins/http-client-authentication/3.1.1` weer zodra 3.1.1
+   is uitgebracht.
+2. Frontend: bouw daar de library (`npm run build` in `frontend`) en installeer hem hier zonder de
+   `package.json` te wijzigen: `npm install --no-save <pad naar die repository>/frontend/dist/plugin`
+   in `frontend`.
 
 ```shell
 ./gradlew :backend:app:bootRun
 ```
 
-`bootRun` start de docker-compose stack (inclusief de mock) en zet de applicatie op
-`http://localhost:8080`. Bij het opstarten wordt automatisch een pluginconfiguratie
-**"Graph Mail (dummy)"** aangemaakt die naar de mock wijst — zie
-`backend/app/src/main/resources/config/plugin/graph-mail.pluginconfig.json`.
+`bootRun` start de docker-compose stack (inclusief de mock en de gateway) en zet de applicatie op
+`http://localhost:8080`. Bij het opstarten worden deze pluginconfiguraties aangemaakt — zie
+`backend/app/src/main/resources/config/plugin/graph-mail.pluginconfig.json`:
 
-Alleen de mock starten:
+| Configuratie | Wat het laat zien |
+| --- | --- |
+| **Graph Mail (dummy)** | Meldt zich aan met *Graph login via gateway* en verstuurt via de gateway. |
+| **Graph login via gateway** (Http Client Authentication) | Token exchange zonder audience naar het token endpoint achter de gateway, met het clientcertificaat dat de gateway accepteert en het CA-certificaat van de gateway. |
+| **Graph login without client certificate** | Geen clientcertificaat: de gateway weigert het aanmelden met *No required SSL certificate was sent*; de melding noemt de configuratie en het certificaat. |
+| **Graph login, untrusted client certificate** | Haalt het token rechtstreeks bij de mock (`http://127.0.0.1:1080`), met een certificaat van een andere CA: de gateway weigert de Graph-verzoeken met *The SSL certificate error*. |
+| **Not a Graph login** | Type *None*: het Graph Mail-scherm zegt dat het type Token exchange moet zijn en laat niet opslaan. |
+| **Microsoft direct** | Token exchange zonder certificaten naar `login.microsoftonline.com`, voor een echte tenant (zie hieronder). |
+
+Kies in *Graph Mail (dummy)* bij **Http Client Authentication-configuratie** een andere en verstuur
+een testmail om de foutmeldingen te zien. Het log van de gateway toont per verzoek het certificaat en
+de uitkomst: `docker logs plugin-docker-compose-graph-mail-gateway`.
+
+> De token endpoints wijzen naar `127.0.0.1`, niet naar `localhost`. Het aanmelden gaat via de
+> `RestClient.Builder` van de applicatie, en daarop herschrijft Valtimo's docker-filter
+> (`valtimo.docker.filter`, hier met de eigen poort 8080) `localhost` naar `host.docker.internal`.
+> Hetzelfde geldt voor elke applicatie waarvan `valtimo.docker.filter.ports` de eigen poort bevat.
+
+De certificaten staan in `backend/app/imports/mtls-gateway/certs` (wegwerpcertificaten, alleen voor
+de sandbox). Nieuwe maken, inclusief de pluginconfiguraties: `backend/app/imports/mtls-gateway/generate-certs.sh`.
+
+Alleen de mock en de gateway starten:
 
 ```shell
-docker compose -f backend/app/docker-compose.yml up -d mockserver
+docker compose -f backend/app/docker-compose.yml up -d mockserver mtls-gateway
 ```
+
+> De sandbox deelt containernamen en poorten met die van andere plugins (zoals
+> `http-client-authentication-plugin`); er kan er één tegelijk draaien. Alleen de gateway heeft een
+> eigen naam en poort (8449).
 
 De stubs staan in `backend/app/imports/mockserver/initializerJson.json` en dekken het token-
 endpoint, de inline `sendMail` en de volledige conceptflow (concept → bijlage toevoegen met een
@@ -133,17 +171,23 @@ een browser kunt openen en de bijlagen kunt controleren.
 
 ### Tegen een echte tenant aan testen
 
-De pluginconfiguratie leest omgevingsvariabelen met een fallback naar de dummy-waarden, dus je
-kunt zonder codewijziging naar echt Azure omschakelen:
+De pluginconfiguratie en `application.yml` lezen omgevingsvariabelen met een fallback naar de
+dummy-waarden, dus je kunt zonder codewijziging naar echt Azure omschakelen (ook via
+`.env.properties`):
 
 ```shell
 export GRAPH_MAIL_TENANT_ID=<tenant-uuid>
 export GRAPH_MAIL_CLIENT_ID=<client-uuid>
 export GRAPH_MAIL_CLIENT_SECRET=<secret>
 export GRAPH_MAIL_SENDER=noreply@jouwdomein.nl
-export GRAPH_MAIL_TOKEN_BASE_URL=https://login.microsoftonline.com
-export GRAPH_MAIL_BASE_URL=https://graph.microsoft.com
+export GRAPH_MAIL_ALLOWED_SENDERS=@jouwdomein.nl
+export GRAPH_MAIL_SANDBOX_HTTP_CLIENT_AUTHENTICATION=9a3e2b10-5c4d-4e8f-a1b2-c3d4e5f60005   # Microsoft direct
+export GRAPH_MAIL_SANDBOX_GRAPH_BASE_URL=https://graph.microsoft.com
+export GRAPH_MAIL_SANDBOX_ALLOW_NON_MICROSOFT=false
 ```
+
+De eerste drie gaan naar de configuratie *Microsoft direct*. `GRAPH_MAIL_TOKEN_BASE_URL` en
+`GRAPH_MAIL_BASE_URL` van eerdere versies doen niets meer.
 
 ## Installatie in je Valtimo-project
 
@@ -152,8 +196,19 @@ export GRAPH_MAIL_BASE_URL=https://graph.microsoft.com
 Voeg de volgende dependency toe aan je `build.gradle.kts`:
 
 ```kotlin
-implementation("com.ritense.valtimoplugins:graph-mail:1.0.4")
+implementation("com.ritense.valtimoplugins:graph-mail:1.1.0")
+// Om aan te melden via een Http Client Authentication-configuratie (aanbevolen):
+implementation("com.ritense.valtimoplugins:http-client-authentication:3.1.1")
 ```
+
+Graph Mail heeft `http-client-authentication` als `compileOnly`: het brengt die plugin niet mee, zodat
+een upgrade van Graph Mail nooit een plugin toevoegt of de versie van een bestaande verandert (andere
+plugins kunnen ervan afhangen, en twee bibliotheken met dezelfde plugin-key houden de applicatie
+tegen bij het starten). Configuraties die zich nog met een eigen client secret aanmelden (verouderd)
+hebben het niet nodig. Kies je een Http Client Authentication-configuratie terwijl de plugin
+ontbreekt of ouder is dan 3.1.1, dan weigert Graph Mail die bij het opslaan met een melding die dat
+zegt. Had je applicatie al een eerdere versie van die plugin, lees dan diens release notes vanaf die
+versie (zie de [release notes](release-notes.md#110)).
 
 Vul daarna het bestaande `operaton`-blok in je `application.yml` aan, en voeg het `graph-mail`-blok
 toe:
@@ -168,7 +223,6 @@ operaton:
 
 graph-mail:
   http:
-    token-base-url: https://login.microsoftonline.com   # default
     graph-base-url: https://graph.microsoft.com         # default
     connect-timeout-seconds: 10
     read-timeout-seconds: 30
@@ -200,20 +254,31 @@ graph-mail:
 npm install @valtimo-plugins/graph-mail
 ```
 
-Voeg de module en specificatie toe aan je `AppModule`:
+En `@valtimo-plugins/http-client-authentication` 3.1.1 of hoger, om de configuratie waarmee Graph
+Mail zich aanmeldt in het beheerscherm te kunnen invullen (eerdere versies eisen een audience).
+
+Voeg beide modules en specificaties toe aan je `AppModule`:
 
 ```typescript
 import { NgModule } from '@angular/core';
 import { PLUGINS_TOKEN } from '@valtimo/plugin';
 import { GraphMailPluginModule, graphMailPluginSpecification } from '@valtimo-plugins/graph-mail';
+import {
+  HttpClientAuthenticationPluginModule,
+  httpClientAuthenticationPluginSpecification,
+} from '@valtimo-plugins/http-client-authentication';
 
 @NgModule({
   imports: [
     // ... andere imports
     GraphMailPluginModule,
+    HttpClientAuthenticationPluginModule,
   ],
   providers: [
-    { provide: PLUGINS_TOKEN, useValue: [graphMailPluginSpecification] },
+    {
+      provide: PLUGINS_TOKEN,
+      useValue: [graphMailPluginSpecification, httpClientAuthenticationPluginSpecification],
+    },
   ],
 })
 export class AppModule {}
@@ -230,14 +295,13 @@ Maak een pluginconfiguratie aan via **Admin → Plugins → Graph Mail Plugin**.
 
 | Eigenschap | Beschrijving | Verplicht |
 | --- | --- | --- |
-| `tenantId` | Azure Directory (tenant) ID | Ja |
-| `clientId` | Azure Application (client) ID | Ja |
-| `clientSecret` | Client secret van de App Registration (versleuteld opgeslagen) | Ja |
+| `authenticationPluginConfiguration` | Id van de Http Client Authentication-configuratie waarmee Graph Mail zich aanmeldt en waarvan hij de certificaten gebruikt. Zie [Aanmelden via Http Client Authentication](#aanmelden-via-http-client-authentication) | Aanbevolen; anders de drie hieronder |
+| `tenantId`, `clientId`, `clientSecret` | **Verouderd.** Het aanmelden van 1.0, alleen gebruikt als `authenticationPluginConfiguration` leeg is. Zie [Verouderd: aanmelden met client secret](#verouderd-aanmelden-met-client-secret) | Alle drie, zonder verwijzing |
 | `allowedSenders` | Whitelist van toegestane afzenders: kommagescheiden volledige adressen (`noreply@gemeente.nl`) en/of domein-entries (`@gemeente.nl`) | Ja |
 | `testSenderMailbox` | Standaard afzenderadres voor de test-send functie | Nee |
 
-De endpoints en timeouts zijn **geen** pluginproperty meer. Ze staan onder `graph-mail.http` in
-`application.yml` — zie *Endpoints zijn deployment-instellingen* hieronder voor de reden.
+Een configuratie heeft één van beide logins nodig; zonder wordt ze bij opslaan en deploy geweigerd. De Graph-endpoints en timeouts zijn **geen** pluginproperty. Ze staan onder `graph-mail.http` in
+`application.yml` — zie [Het Graph-endpoint is een deployment-instelling](#het-graph-endpoint-is-een-deployment-instelling-geen-pluginproperty) hieronder voor de reden.
 
 ### Afzender-whitelist (`allowedSenders`)
 
@@ -249,30 +313,13 @@ subdomeinen. De whitelist geldt ook voor het test-send endpoint.
 > **Migratie:** pluginconfiguraties die vóór de introductie van `allowedSenders` zijn aangemaakt,
 > weigeren na de upgrade elke verzending totdat de whitelist eenmalig is ingevuld en opgeslagen.
 
-#### Wijzigen vereist het client secret
+#### Wie de whitelist mag wijzigen
 
-De whitelist bepaalt namens welke mailboxen de tenant-brede `Mail.Send`-machtiging via deze plugin
-gebruikt mag worden. Een adres toevoegen is daarmee feitelijk een rechtenuitbreiding: wie dat doet,
-kan vanaf dat moment als die mailbox mailen. Daarom is een gewijzigde whitelist alleen op te slaan
-wanneer het `clientSecret` in diezelfde request opnieuw wordt meegegeven — beheerschermtoegang
-alleen is niet genoeg, je moet de credential ook daadwerkelijk bezitten.
-
-Blijft de whitelist ongewijzigd, dan verandert er niets: het secretveld mag leeg blijven en Valtimo
-behoudt de opgeslagen waarde. Herordenen of anders spatiëren van dezelfde adressen telt niet als
-wijziging; hoofdletters, dubbele vermeldingen en de bracket-notatie (`["a@x.nl","b@x.nl"]`, die de
-backend-parser ook accepteert) evenmin. Verwijderen telt wél als wijziging — versmallen is op
-zichzelf geen escalatie, maar zo kan "verwijderen en opnieuw toevoegen" geen omweg worden.
-
-Dit wordt server-side afgedwongen (`AllowedSendersChangeGuard`), dus ook een directe
-`PUT /api/v1/plugin/configuration/{id}` die de frontend omzeilt krijgt een `400`. De controle grijpt
-in vóórdat Valtimo een leeg secretveld aanvult met de opgeslagen waarde — daarna is niet meer vast
-te stellen óf het secret is meegegeven.
-
-> **Uitschakelen** kan met `graph-mail.require-secret-for-allowlist-change: false`. Dat is een reële
-> verzwakking en daarom een expliciete, zichtbare keuze. De plugin weigert op te starten wanneer de
-> controle aan staat maar niet toegepast kan worden (bijvoorbeeld doordat een Valtimo-upgrade de
-> onderliggende signatuur wijzigde) — een beveiligingscontrole die stilletjes wegvalt is erger dan
-> een die nooit beloofd is.
+Wie pluginconfiguraties mag beheren, kan de whitelist wijzigen; de plugin vraagt daar geen secret
+voor (in 1.x wel). Wie dat recht heeft, kan ook de Http Client Authentication-configuratie wijzigen,
+dus een controle in Graph Mail zou weinig begrenzen. De grens ligt daarom buiten de plugin: een
+Exchange Online-scope (hieronder) en de netwerkmaatregelen uit de
+[handleiding](handleiding.md#wie-bij-het-secret-kan).
 
 #### Hoe fijnmazig, naast een Exchange Online-scope?
 
@@ -318,7 +365,8 @@ Ook met een correct ingestelde scope blijft de whitelist zinvol: de scope is nie
 Valtimo, hij wordt door een ander team beheerd en kan verschuiven zonder dat dat hier opvalt, en een
 afzender buiten de lijst wordt lokaal geweigerd vóór de tokenaanvraag in plaats van als Graph-`403`
 midden in het proces. Omgekeerd maakt de whitelist de scope niet overbodig: die blijft de primaire
-controle, omdat hij ook beschermt wanneer het client secret buiten de plugin om wordt misbruikt.
+controle, omdat hij ook beschermt wanneer het client secret buiten de plugin om wordt misbruikt, en
+wanneer iemand met beheerrechten de whitelist verruimt.
 
 ## Actie: send-email
 
@@ -491,8 +539,9 @@ Elke mislukte verzending logt een `verdict`-veld dat aangeeft wat de beheerder m
 | Verdict | Betekenis |
 | --- | --- |
 | `PERMANENT_INPUT` | Invoer- of configuratiefout; opnieuw proberen faalt identiek. Corrigeer de procesdata of de pluginconfiguratie. |
-| `PERMANENT_REMOTE` | De overkant weigert dit permanent en dat verandert niet vanzelf: Graph zelf (bijv. 403 zonder `Mail.Send`, 404 onbekende mailbox), of de uitgaande proxy (407, zie *Uitgaande proxy*). Vereist een configuratie- of permissiewijziging. |
+| `PERMANENT_REMOTE` | De overkant weigert dit permanent en dat verandert niet vanzelf: het token endpoint (aanmelden geweigerd), Graph zelf (bijv. 401 token geweigerd, 403 zonder `Mail.Send`, 404 onbekende mailbox), of de uitgaande proxy (407, zie *Uitgaande proxy*). Vereist een configuratie- of permissiewijziging. |
 | `UNKNOWN` | Transportfout na verzending; de mail is mogelijk wél verstuurd. Verifieer voordat je opnieuw uitvoert. |
+| `CERTIFICATES` | De certificaten van de Http Client Authentication-configuratie zijn niet te laden, of de gateway weigerde ze — in TLS (ook bij het aanmelden), of met een HTTP-fout die niet van Microsoft kwam. Het verzoek heeft Microsoft niet bereikt. De melding noemt de configuratie. |
 | `TRANSIENT` | Tijdelijk (429/5xx, of een netwerkfout op een herhaalbare stap zoals conceptaanmaak, het aanmaken van een upload-sessie, of een verbinding die nooit tot stand kwam); de job-executor probeert het opnieuw. Een transportfout op `sendMail` of `messages/{id}/send` nádat het verzoek verstuurd is valt hier **niet** onder — die is `UNKNOWN`. |
 
 Deze classificatie zit bewust in de logging en niet in een `BpmnError`: het omzetten van permanente
@@ -560,8 +609,8 @@ functionele bewoordingen.
 
 ### Secret management
 
-Het `clientSecret` is een Valtimo secret property (`@PluginProperty(secret = true)`): het wordt
-AES-versleuteld opgeslagen in de database en nooit teruggestuurd naar de frontend. De
+Het client secret staat in de Http Client Authentication-configuratie, als Valtimo secret property
+(`@PluginProperty(secret = true)`): het wordt AES-versleuteld opgeslagen in de database en nooit teruggestuurd naar de frontend. De
 encryptiesleutel komt uit `valtimo.plugin.encryption-secret` en moet exact 16, 24 of 32 bytes lang
 zijn. Zet die sleutel **nooit** in de repository of in een gecommit configuratiebestand — lever hem
 aan via een environment variable of een secret store:
@@ -576,25 +625,22 @@ Wie deze sleutel én een databasedump bezit, kan alle plugin-secrets ontsleutele
 secret in Azure periodiek en behandel de encryptiesleutel met hetzelfde beveiligingsniveau als de
 secrets zelf.
 
-### Endpoints zijn deployment-instellingen, geen pluginproperties
+### Het Graph-endpoint is een deployment-instelling, geen pluginproperty
 
-`tokenBaseUrl` en `graphBaseUrl` waren eerder per pluginconfiguratie instelbaar vanuit de beheer-UI.
-Dat was een exfiltratiepad voor het client secret: dat secret wordt als formulierveld naar
-`tokenBaseUrl` gePOST, dus wie pluginconfiguraties mocht beheren kon het naar een eigen host laten
-sturen. `graphBaseUrl` gaf daarnaast een SSRF-primitief, en de hostcontrole op de upload-URL leidde
-haar verwachte host áf uit `graphBaseUrl` — waardoor die controle precies zo sterk was als de waarde
-die een beheerder had ingevuld.
+`graphBaseUrl` was eerder per pluginconfiguratie instelbaar vanuit de beheer-UI. Dat gaf een
+SSRF-primitief, en de hostcontrole op de upload-URL leidde haar verwachte host áf uit `graphBaseUrl`
+— waardoor die controle precies zo sterk was als de waarde die een beheerder had ingevuld.
 
-Deze instellingen staan nu onder `graph-mail.http` en worden bij het opstarten gevalideerd tegen een
-vaste allowlist van Microsoft-endpoints (inclusief de sovereign clouds). Een afwijkende waarde laat
-de applicatie falen bij opstarten met een leesbare melding.
+Het staat nu onder `graph-mail.http.graph-base-url` en wordt bij het opstarten gevalideerd tegen een
+vaste allowlist van Microsoft Graph-endpoints (inclusief de sovereign clouds). Een afwijkende waarde
+laat de applicatie falen bij opstarten met een leesbare melding.
 
-> **Migratie:** bestaande pluginconfiguraties met een `tokenBaseUrl`- of `graphBaseUrl`-waarde
-> negeren die waarde na deze upgrade. Stond er een niet-standaard endpoint in, dan kun je dat
-> **niet** ongewijzigd overzetten: `graph-mail.http` accepteert alleen endpoints uit de allowlist, en
-> een afwijkende waarde laat de applicatie falen bij opstarten. `connectTimeoutSeconds` en
-> `readTimeoutSeconds` kunnen wél ongewijzigd mee als `connect-timeout-seconds` en
-> `read-timeout-seconds`.
+Het token endpoint van een Http Client Authentication-configuratie staat in die configuratie en wordt
+niet gecontroleerd. Wie pluginconfiguraties mag beheren, kan het dus naar een eigen host laten wijzen;
+dat begrens je in het netwerk, zie de [handleiding](handleiding.md#wie-bij-het-secret-kan). Alleen het
+verouderde aanmelden met client secret gebruikt `graph-mail.http.token-base-url`; dat wordt, als
+voorheen, bij het opstarten gecontroleerd tegen de Microsoft-loginhosts, omdat het secret er als
+formulierveld naartoe gaat.
 
 ### Uploadhosts worden per cloud gescheiden
 
@@ -635,10 +681,117 @@ zouden anders stil niets doen en het verkeer alsnog door de proxy sturen.
 > wijst in plaats van naar Graph. Die classificatie is bewust permanent: de proxy weigert elke poging
 > identiek tot iemand de configuratie aanpast.
 
-> De proxy is bewust een deployment-instelling en geen pluginproperty. Al het verkeer naar het
-> token-endpoint loopt erdoorheen, inclusief het formulier waarin het client secret wordt gePOST —
-> instelbaar maken vanuit de beheer-UI zou hetzelfde exfiltratiepad heropenen dat hierboven is
-> gedicht door `tokenBaseUrl` daar weg te halen.
+> De proxy is bewust een deployment-instelling en geen pluginproperty: hij ziet elk Graph-verzoek,
+> met het token.
+
+> **Het aanmelden gaat niet via deze proxy.** Het token-verzoek doet Http Client Authentication, met
+> de HTTP-client en timeouts van Valtimo (standaard 180 seconden leestimeout,
+> `valtimo.http.rest-client.read-timeout`, voor alle REST-clients van Valtimo). Heeft het aanmelden
+> een proxy nodig, stel die dan op JVM-niveau in. Een token endpoint dat blijft hangen, houdt een
+> job-executor-thread zo lang vast als die timeout.
+
+### Aanmelden via Http Client Authentication
+
+Graph Mail meldt zich bij Microsoft aan via de Http Client Authentication-configuratie in
+`authenticationPluginConfiguration`: type **Token exchange zonder audience**. Die doet het
+client-credentials-verzoek naar het token endpoint van Entra (met het clientcertificaat, als er een
+is) en bewaart het token tot kort voordat het verloopt. Graph Mail gebruikt daarvan
+`HttpClientAuthenticator.authenticationHeaders()` (per verzoek, de `Authorization`-header) en
+`sslContext()` (de certificaten), op zijn eigen verbinding: proxy, timeouts, geen redirects en
+HTTP/1.1 blijven die van `graph-mail.http`. `applyAuth()` wordt bewust niet gebruikt, die zou de
+request factory vervangen. Inrichten vanuit het beheerscherm: zie de [handleiding](handleiding.md).
+
+- **Wat Graph Mail controleert** (`GraphMailLogin`), bij opslaan, bij deployen en per verzending: dat
+  de verwijzing een Http Client Authentication-configuratie is van type Token exchange, zonder
+  audience, met een scope. Niet waar het token endpoint naartoe wijst, en niet welke resource de
+  scope noemt (zie [handleiding](handleiding.md#wie-bij-het-secret-kan)). Een verkeerd endpoint of
+  een verkeerde scope geeft een aanmeldfout of een Graph-401 die de configuratie noemt. Het
+  beheerscherm doet dezelfde controles, omdat Valtimo een geweigerde opslag alleen als algemene fout
+  toont.
+- **Een verwijzing, geen getypeerde property.** De property is een gewone string met het id. Valtimo
+  13.48 kan bij een property van een categorie-type niet zeggen wat er mis is met de keuze, en faalt
+  bij een optionele als die leeg is — en optioneel moet ze zijn, voor configuraties met client secret. De sleutel bevat `PluginConfiguration`, zodat Valtimo's
+  export de Graph Mail-configuratie ná de Http Client Authentication-configuratie zet.
+- **Volgorde in `*.pluginconfig.json`:** de Http Client Authentication-configuratie in **hetzelfde
+  bestand, vóór** de Graph Mail-configuratie. De volgorde tussen bestanden is niet betrouwbaar (in een
+  jar die van de entries).
+- **Http Client Authentication is `compileOnly`.** Alleen `HttpClientAuthenticatorCalls` in
+  `GraphMailLogin.kt` raakt een type van die plugin aan, en pas nadat
+  `httpClientAuthenticationProblem()` heeft vastgesteld dat de plugin er is en `authenticationHeaders()`
+  en `sslContext()` heeft. Zonder de plugin laden de andere klassen gewoon, en werkt het aanmelden met
+  client secret.
+- **Aanmeldfouten** worden ingedeeld op de cause chain van Http Client Authentication: met
+  certificaten wordt een TLS-weigering `CERTIFICATES`; 408, 429, 5xx en netwerkfouten zijn tijdelijk en worden binnen
+  het wachtbudget opnieuw geprobeerd (er is dan nog niets verstuurd); de rest is permanent, met de
+  melding wat je in de configuratie moet controleren. De body van een foutantwoord komt nooit in een
+  melding: een token endpoint kan het formulier, met het secret, terugsturen. Http Client
+  Authentication haalt de tokenverzoeken ook buiten Valtimo's request-logging.
+- **Een Graph-401** wordt niet met een nieuw token herhaald: Http Client Authentication houdt haar
+  token in haar eigen cache (`GraphMailAuthentication.rejected` geeft `false`). Een ingetrokken token
+  blijft tot het verloopt (~1 uur) in gebruik.
+
+### Verouderd: aanmelden met client secret
+
+Een configuratie zonder `authenticationPluginConfiguration` meldt zich aan zoals in 1.0: met haar
+eigen `tenantId`, `clientId` en `clientSecret`, via een client-credentials-verzoek naar
+`graph-mail.http.token-base-url` (`GraphMailClientSecretLogin`). Zo blijven configuraties van 1.0 —
+opgeslagen of in een `*.pluginconfig.json` — na een upgrade werken, en start de applicatie. Het
+verdwijnt in een volgende major versie; Graph Mail logt het als verouderd bij elke opslag en deploy
+(met een `*.pluginconfig.json` dus bij elke start) en eenmaal per configuratie bij de eerste
+verzending.
+
+- **De drie properties bestaan nog**, optioneel. `clientSecret` blijft een secret-property: Valtimo
+  versleutelt en ontsleutelt alleen properties die de plugin definieert, dus zonder die definitie zijn
+  de secrets van 1.0 onleesbaar en wordt een secret uit een `*.pluginconfig.json` onversleuteld
+  opgeslagen.
+- **Controles als in 1.0**: alle drie ingevuld, en een `tenantId` die de token-URL niet kan
+  veranderen (`isValidTenantId`). Een verwijzing gaat altijd voor; staan `tenantId` of `clientId` er
+  dan nog, dan logt Graph Mail dat ze genegeerd worden.
+- **Eén tokenverzoek per poging.** Het verzoek gaat over de gedeelde Graph-client, dus met de proxy en
+  timeouts van `graph-mail.http`. 408, 429, 5xx en netwerkfouten zijn tijdelijk en worden, zoals bij
+  Http Client Authentication, binnen het wachtbudget van de verzending opnieuw geprobeerd; andere
+  4xx zijn permanent. Een foutantwoord komt zonder body in de melding en in de cause.
+- **Een Graph-401** haalt het geweigerde token uit `GraphTokenCache` (`GraphMailAuthentication.rejected`
+  geeft `true`), en `GraphMailClientImpl` probeert het verzoek eenmaal opnieuw met een nieuw token, zoals
+  in 1.0. Een 401 is geweigerd vóór verwerking, dus dat is ook bij een verzending veilig. Een tweede
+  401 is permanent.
+- **Het beheerscherm** toont de drie velden zolang er geen Http Client Authentication-configuratie
+  gekozen is. Het stuurt `tenantId` en `clientId` altijd mee terug: Valtimo overschrijft
+  niet-geheime properties bij een update met wat er binnenkomt, ook met niets. Kies je een
+  configuratie, dan worden ze leeggemaakt. Een opgeslagen secret kan het scherm niet wissen (Valtimo
+  bewaart een secret dat leeg binnenkomt); Graph Mail negeert het dan.
+
+### Clientcertificaat via een gateway (mTLS)
+
+Staan er certificaten in de Http Client Authentication-configuratie, dan gebruikt Graph Mail ze voor
+al zijn verkeer; het aanmelden doet Http Client Authentication er zelf mee.
+
+- **Vertrouwen.** Staat er een servercertificaat in, dan vertrouwt Graph Mail voor de Graph-verzoeken
+  en uploads **alleen** dat, niet meer de standaard-CA's van de JVM. Het aanmelden vertrouwt daarnaast
+  de standaard-CA's. Een gateway die het aanmelden en Graph doorlaat maar niet de uploadhosts
+  (`*.office.com` e.d.), laat bijlagen vanaf 3 MB op een certificaatfout stuklopen.
+- **Endpoints.** Een transparante gateway laat de Microsoft-URL's ongemoeid; dan verandert er niets
+  aan `graph-mail.http`. Een gateway met een eigen URL wordt voor Graph in productie (nog) niet
+  geaccepteerd: `graph-base-url` moet een Microsoft-host zijn.
+- **Bijlagen.** Bijlagen van 3 MB of groter gaan in stukken van 3,2 MB; de gateway moet verzoeken
+  van die grootte doorlaten (nginx staat standaard 1 MB toe: `client_max_body_size`).
+- **Het certificaat komt met de hele keten.** De JDK biedt een clientcertificaat alleen aan als de
+  gateway de uitgever ervan noemt; zet tussenliggende certificaten dus mee in de PEM.
+- **Fouten** worden `verdict=CERTIFICATES`, met een melding die de configuratie noemt. Dat geldt voor
+  een weigering in TLS en voor een HTTP-weigering op een Graph-verzoek die niet van Microsoft komt
+  (status 400, 401 of 403 zonder Graph-headers of -foutbody; nginx weigert een ontbrekend of
+  onbekend certificaat met een 400). Een TLS-weigering die de client ziet, is geen `UNKNOWN`: de
+  gateway heeft het verzoek niet verwerkt. Eén grens: met TLS 1.3 kan een gateway die het certificaat
+  weigert de verbinding sluiten voordat zijn melding (alert) aankomt. Dan is dat niet te
+  onderscheiden van een verbinding die na het versturen wegviel; bij een verzending blijft dat
+  `UNKNOWN`, met in de melding de configuratie als plek om te kijken. De controle zit in een
+  interceptor op de client van de certificaten, dus vóór de retry-logica en voor elk verzoek. Een
+  HTTP-weigering bij het aanmelden is een aanmeldfout met de hint om het certificaat en de gateway te
+  controleren: daar is niet te zien of de gateway of Microsoft weigerde.
+- **Verbindingen.** Per certificaatset is er een eigen client met een eigen connection pool (maximaal
+  16 sets tegelijk). Http Client Authentication levert voor dezelfde certificaten steeds hetzelfde
+  `SSLContext`, dus verbindingen worden hergebruikt. Een applicatie die zelf `graphMailRestClient`
+  definieert, krijgt voor certificaatclients de instellingen van de plugin.
 
 ### Geheugengebruik bij bijlagen
 
@@ -663,7 +816,8 @@ naar schijf gestreamd. Twee verschillende grenzen bepalen daarom de piek:
 
 ### Connection pooling
 
-De plugin gebruikt één gedeelde, gepoolde HTTP-client (de JDK `HttpClient`) voor alle verzendingen.
+De plugin gebruikt één gedeelde, gepoolde HTTP-client (de JDK `HttpClient`) voor alle verzendingen
+zonder certificaten (met certificaten: zie *Clientcertificaat via een gateway (mTLS)*).
 Eerder werd per plugin-actie-invocatie een nieuwe `RestTemplate` opgebouwd — Valtimo hydrateert
 namelijk een nieuwe plugin-instantie per actie — waardoor er per e-mail een volledige TLS-handshake
 nodig was en verbindingen nooit hergebruikt werden. Er is bewust geen afhankelijkheid van Apache
@@ -721,6 +875,7 @@ Resterende maximale blokkeertijden per verzending:
 | Wachten op een nieuwe poging (backoff, `Retry-After`) | 2 seconden totaal per aanroep |
 | Reguliere verzending, inclusief netwerktijd | 30 seconden |
 | Verzending via een concept (upload-sessie of losse POSTs) | 120 seconden |
+| Aanmelden bij het token endpoint (Http Client Authentication), daarbovenop | `valtimo.http.rest-client.read-timeout` (standaard 180 seconden) |
 
 De twee onderste grenzen zijn geen wachttijd maar werk: het overzetten van een bijlage van 25 MiB
 duurt nu eenmaal. Alleen de bovenste was de bron van de engine-brede stilstand, en die is nu
@@ -734,26 +889,25 @@ begrensd.
 
 ### Token caching
 
-Access tokens worden gecached met een marge van 60 seconden voor de expiry. Cache-hits blokkeren
-niet; gelijktijdige misses voor dezelfde key vallen samen in één Azure-aanroep. Bij een 401 wordt
-alleen de betrokken key geïnvalideerd en exact één keer opnieuw geprobeerd. De cache is standaard
-begrensd op 64 entries.
+Het token cachet Http Client Authentication, per configuratie (de sleutel bevat token endpoint,
+client ID, een hash van het secret, scope en certificaten), tot kort voordat het verloopt.
+Gelijktijdige aanvragen voor dezelfde configuratie wachten op één aanroep. Graph Mail vraagt per
+verzoek de `Authorization`-header.
 
-De cachesleutel bevat naast `tenantId` en `clientId` een hash van het client secret. Zonder dat kon
-een configuratie met een verkeerd secret meeliften op het token dat een andere configuratie voor
-dezelfde tenant had opgehaald.
+Alleen het verouderde aanmelden met client secret gebruikt Graph Mails eigen `GraphTokenCache` (een
+gedeelde bean; de sleutel is tenant, client ID en een hash van het secret).
 
 ### Metrics
 
 Heeft de applicatie Micrometer op het classpath — GZAC levert Actuator mee — dan publiceert de plugin
-meters voor verzendingen, hun duur, de vrije bijlage-slots en de tokencache:
+meters voor verzendingen, hun duur en de vrije bijlage-slots:
 
 | Meter | Type | Betekenis |
 | --- | --- | --- |
 | `graph.mail.sends` | counter | Verzendingen, met een `outcome`-tag die hetzelfde vocabulaire gebruikt als het `verdict`-veld |
 | `graph.mail.send.duration` | timer | Duur van een verzending |
-| `graph.mail.attachment.slots.available` | gauge | Vrije slots in de bijlage-limiter |
-| `graph.mail.token.cache.size` | gauge | Aantal entries in de tokencache |
+| `graph.mail.attachment.permits.available` | gauge | Vrije slots in de bijlage-limiter |
+| `graph.mail.token.cache.size` | gauge | Tokens in de cache van het verouderde aanmelden met client secret |
 
 De afhankelijkheid is `compileOnly` met `@ConditionalOnClass`: zonder Micrometer start de plugin
 gewoon en publiceert hij niets.
@@ -785,6 +939,6 @@ Je kunt die logger apart configureren:
 
 ## Test-send
 
-Via de pluginconfiguratiepagina kan een testmail worden verstuurd om te verifiëren dat de
-Azure-credentials correct zijn geconfigureerd. Dit vereist de rol `ROLE_ADMIN`. De testmail wordt
-niet opgeslagen in Verzonden items en de afzender moet op de `allowedSenders`-whitelist staan.
+Via de pluginconfiguratiepagina kan een testmail worden verstuurd om te verifiëren dat het
+aanmelden via de Http Client Authentication-configuratie en de machtigingen werken. Dit vereist de
+rol `ROLE_ADMIN`. De testmail wordt niet opgeslagen in Verzonden items en de afzender moet op de `allowedSenders`-whitelist staan.

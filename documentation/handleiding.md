@@ -49,30 +49,59 @@ Vraag daarnaast om deze machtigingen:
 > echt nodig hebt: `Mail.ReadWrite` uitsluitend bij grote bijlagen.
 
 Een client secret heeft een einddatum. Vraag de beheerder wanneer het verloopt en zet een
-herinnering — als het secret verloopt, stopt het versturen van mail met een authenticatiefout.
+herinnering — als het secret verloopt, stopt het versturen van mail met een aanmeldfout.
 
-## Stap 1 — Pluginconfiguratie aanmaken
+## Stap 1 — Aanmelden bij Microsoft: een Http Client Authentication-configuratie
+
+Graph Mail meldt zich bij Microsoft aan via een configuratie van de plugin **Http Client
+Authentication**. Daar staan de Client ID, het secret en, als je via een gateway gaat, de
+certificaten; zo beheer je ze op één plek. Ga naar **Admin → Plugins**, kies **Http Client
+Authentication** en maak een configuratie aan:
+
+| Veld | Wat je invult |
+| --- | --- |
+| **Configuratienaam** | Bijv. `Graph Mail aanmelden`. Gebruik een eigen configuratie voor Graph Mail, die andere plugins niet gebruiken. |
+| **Authenticatie type** | *Token exchange* |
+| **Token endpoint URL** | `https://login.microsoftonline.com/<Directory (tenant) ID>/oauth2/v2.0/token` |
+| **Client ID** | De Application (client) ID |
+| **Client secret** | Het secret van de beheerder. Wordt versleuteld opgeslagen; je kunt hem na opslaan niet meer uitlezen. |
+| **Audience** | **Leeg laten.** Microsoft vraagt alleen om het secret (client credentials), niet om een token exchange. |
+| **Scope** | `https://graph.microsoft.com/.default` |
+
+Loopt het verkeer naar Microsoft via een gateway met clientcertificaat, vul dan in dezelfde
+configuratie ook de certificaten in; zie *Via een gateway met clientcertificaat* hieronder.
+
+## Stap 2 — Graph Mail-configuratie aanmaken
 
 Ga naar **Admin → Plugins**, kies **Microsoft Graph Mail** en maak een nieuwe configuratie aan.
 
 | Veld | Wat je invult |
 | --- | --- |
 | **Configuratienaam** | Vrije naam waaronder je deze configuratie terugvindt bij het koppelen aan een proces, bijv. `Graph Mail productie`. |
-| **Tenant ID** | De Directory (tenant) ID van je beheerder. Moet een UUID zijn — het scherm geeft direct een melding als het formaat niet klopt. |
-| **Client ID** | De Application (client) ID. Ook een UUID, met dezelfde controle. |
-| **Client Secret** | Het secret van de beheerder. Wordt gemaskeerd weergegeven en versleuteld opgeslagen; je kunt hem na opslaan niet meer uitlezen. |
 | **Toegestane afzenders** | Verplicht. De mailboxen waaruit deze configuratie mag versturen. Zie *Toegestane afzenders* hieronder. |
+| **Http Client Authentication-configuratie** | Aanbevolen. De configuratie uit stap 1. Zie *Bestaande configuraties met client secret* hieronder als je die (nog) niet gebruikt. |
 | **Afzender testmail (e-mailadres)** | Optioneel. Het afzenderadres dat standaard wordt voorgesteld bij de testmail hieronder. Heeft geen invloed op het versturen vanuit processen. |
 
-Je kunt meerdere configuraties naast elkaar aanmaken, bijvoorbeeld één per afdeling of per
-tenant. Bij het koppelen aan een processtap kies je welke je gebruikt.
+Het scherm controleert de gekozen configuratie meteen. Kan die zich niet bij Microsoft aanmelden,
+dan staat eronder wat je moet aanpassen, en kun je niet opslaan. Of de Client ID en het secret
+kloppen, blijkt pas bij de testmail (stap 3).
 
-**Een bestaande configuratie wijzigen:** laat *Client Secret* leeg om het huidige secret te
-behouden. Het veld toont dan de hint *(ongewijzigd laten als leeg)*. Vul je het wél in, dan
-wordt het secret overschreven.
+Je kunt meerdere Graph Mail-configuraties naast elkaar aanmaken, bijvoorbeeld één per afdeling of
+per tenant. Bij het koppelen aan een processtap kies je welke je gebruikt.
 
-Op één punt geldt dat niet: **wijzig je de lijst met toegestane afzenders, dan moet je het Client
-Secret opnieuw invullen.** Zie hieronder waarom.
+### Bestaande configuraties met client secret (verouderd)
+
+Configuraties uit versie 1.0 melden zich aan met een eigen **Tenant ID**, **Client ID** en **Client
+Secret**. Die blijven werken. Zolang er geen Http Client Authentication-configuratie gekozen is, toont
+het scherm deze drie velden onder de keuzelijst, met de melding dat dit aanmelden verouderd is. Het
+secret hoef je niet opnieuw in te vullen; laat je het leeg, dan blijft het opgeslagen secret staan.
+
+Dit aanmelden verdwijnt in een volgende major versie. Overstappen doe je zo:
+
+1. Maak een Http Client Authentication-configuratie aan (stap 1), met dezelfde Client ID en hetzelfde
+   secret, en de Tenant ID in het token endpoint.
+2. Kies die in de keuzelijst. De drie velden verdwijnen; sla op.
+3. Verstuur een testmail (stap 3).
 
 ### Toegestane afzenders
 
@@ -84,25 +113,38 @@ Je vult volledige adressen in (`noreply@gemeente.nl`), hele domeinen (`@gemeente
 combinatie daarvan, gescheiden door komma's. Hoofdletters maken niet uit. Een domein-entry dekt geen
 subdomeinen: `@gemeente.nl` staat `post@gemeente.nl` toe, maar niet `post@mail.gemeente.nl`.
 
-> **Bij het bijwerken van een bestaande installatie:** configuraties van vóór deze versie hebben nog
-> geen lijst. Die versturen **niets** totdat je de lijst eenmalig invult en opslaat. Doe dat vóór of
-> direct na de upgrade.
+De machtiging die je beheerder in Azure heeft gegeven geldt voor de hele tenant: technisch kan de
+plugin namens elke mailbox mailen. Deze lijst is de grens die dat in de plugin inperkt. Wie
+pluginconfiguraties mag beheren, kan de lijst aanpassen; begrens de mailboxen daarom ook in Microsoft
+365, met een Exchange Online Application Access Policy.
 
-**Waarom het Client Secret erbij moet.** De machtiging die je beheerder in Azure heeft gegeven geldt
-voor de hele tenant: technisch kan de plugin namens elke mailbox mailen. Deze lijst is de grens die
-dat inperkt. Een adres toevoegen betekent dus dat er vanaf dat moment namens die mailbox gemaild kan
-worden — en dat hoort niet te kunnen met alleen toegang tot dit scherm. Wie de lijst verruimt, moet
-ook het secret bezitten.
+### Via een gateway met clientcertificaat (mTLS)
 
-Laat je de lijst ongemoeid, dan verandert er niets en mag het secretveld leeg blijven. De volgorde
-of de spatiëring aanpassen telt niet als wijziging; een adres verwijderen wél.
+Sommige organisaties laten uitgaand verkeer naar Microsoft via een eigen gateway lopen die alleen
+verbindingen met een geldig **clientcertificaat** doorlaat. De certificaten staan in dezelfde
+Http Client Authentication-configuratie als het aanmelden (stap 1):
 
-## Stap 2 — Testmail versturen
+- **Clientcertificaat (PEM)** en de bijbehorende **private key**. Neem de hele keten op: het
+  clientcertificaat gevolgd door eventuele tussenliggende certificaten. Een certificaat zonder de
+  keten die de gateway kent, wordt niet eens aangeboden.
+- **Servercertificaat (PEM):** het (CA-)certificaat waarmee het certificaat van de gateway is
+  ondertekend.
+- In plaats van PEM kan ook een keystore- en truststore-bestand.
 
-Zodra Tenant ID en Client ID geldig zijn ingevuld — en bij een nieuwe configuratie ook het
-Client Secret — verschijnt op dezelfde pagina het blok **Testmail versturen**. Hiermee
-controleer je in één klik of de gegevens van je beheerder werken, nog voordat je een proces
-inricht.
+De certificaten gelden voor al het verkeer van Graph Mail: het aanmelden bij Microsoft, het
+versturen en het uploaden van grote bijlagen. Zonder certificaten verbindt Graph Mail rechtstreeks.
+
+**Bijlagen van 3 MB en groter** gaan via een upload-URL die Graph teruggeeft. De gateway moet die
+URL herschrijven naar zichzelf en de upload doorsturen; anders faalt zo'n verzending met *"Upload URL
+returned by the Graph API failed host validation"*. Of de gateway de certificaten accepteert, blijkt
+bij de testmail (stap 3).
+
+## Stap 3 — Testmail versturen
+
+Zodra een bruikbare Http Client Authentication-configuratie is gekozen (of, verouderd, Tenant ID,
+Client ID en Client Secret zijn ingevuld), verschijnt op dezelfde
+pagina het blok **Testmail versturen**. Hiermee controleer je in één klik of het aanmelden en de
+machtigingen werken, nog voordat je een proces inricht.
 
 1. **Sla de configuratie eerst op.** Zolang dat niet is gebeurd, meldt het scherm
    *"Sla de configuratie eerst op voordat je een testmail verstuurt."* en blijft de knop uit.
@@ -123,24 +165,25 @@ Het versturen van een testmail is voorbehouden aan gebruikers met de beheerdersr
 
 ### Wat de meldingen betekenen
 
-Bij een fout toont het scherm de melding plus de HTTP-status. De belangrijkste:
+Bij een fout toont het scherm de melding plus de HTTP-status. De meldingen noemen de Http Client
+Authentication-configuratie (*'…' (id)*) en zeggen wat je moet controleren. De belangrijkste:
 
 | Melding | Wat er aan de hand is |
 | --- | --- |
-| *Testmail succesvol verzonden naar …* | Alles goed. Credentials en machtigingen werken. |
-| *Ongeldige aanvraag (400) — controleer Tenant ID en Client ID* | Een van beide ID's bestaat niet in Azure. |
-| *Authenticatie mislukt (401) — controleer Tenant ID, Client ID en Client Secret* | Meestal een verlopen of verkeerd overgenomen client secret. |
-| *Toegang geweigerd (403) — controleer of Mail.Send is toegekend in de Azure App Registration* | De machtiging ontbreekt, of er is geen beheerdersconsent gegeven. Terug naar je Azure-beheerder. |
-| *Te veel verzoeken (429)* | Microsoft begrenst tijdelijk. Even wachten en opnieuw proberen. |
-| *Azure / Graph API tijdelijk niet beschikbaar* | Storing aan de Microsoft-kant. Later opnieuw proberen. |
+| *Testmail succesvol verzonden naar …* | Alles goed. Aanmelden en machtigingen werken. |
+| *Verzenden mislukt (401)* | Het aanmelden of het token werd geweigerd: controleer in de genoemde configuratie het token endpoint, de Client ID, het secret (verlopen?) en de scope, en of `Mail.Send` met beheerdersconsent is toegekend. |
+| *Verzenden mislukt (403) — … Access denied* | De machtiging ontbreekt, er is geen beheerdersconsent gegeven, of een Application Access Policy sluit deze mailbox uit. Terug naar je Azure-beheerder. |
+| *Verzenden mislukt (429)* of *(503)* | Microsoft, het token endpoint of de gateway begrenst tijdelijk of is niet bereikbaar. Even wachten en opnieuw proberen. |
+| *Aanmelden niet mogelijk — …* | De gekozen Http Client Authentication-configuratie bestaat niet meer of kan zich niet bij Microsoft aanmelden (zie stap 2). |
 | *Ongeldig afzender e-mailadres* | Het ingevulde afzenderadres heeft geen geldig e-mailformaat. |
 | *Plugin configuratie niet gevonden* | De configuratie is verwijderd of nog niet opgeslagen. Opnieuw opslaan. |
-| *Verbindingsfout* | Valtimo kon de eigen server niet bereiken; geen Azure-probleem. |
+| *Verbindingsfout* | Valtimo kon de eigen server niet bereiken; geen Microsoft-probleem. |
+| *Certificaten — …* | Een probleem met de certificaten of de gateway: geweigerd, niet vertrouwd, verlopen of niet te lezen. Controleer client- en servercertificaat in de genoemde configuratie; de melding noemt de reden. |
 
-Een 403 die pas ná een geslaagde 401-controle optreedt, wijst bijna altijd op een ontbrekende
-`Mail.ReadWrite` bij grote bijlagen — niet op een verkeerd secret.
+Een 403 bij grote bijlagen wijst bijna altijd op een ontbrekende `Mail.ReadWrite` — niet op een
+verkeerd secret.
 
-## Stap 3 — De actie aan een processtap koppelen
+## Stap 4 — De actie aan een processtap koppelen
 
 De plugin biedt één actie: **Verstuur e-mail**. Die koppel je aan een **Service Task** in een
 procesmodel. Ga naar **Admin → Processen**, kies het proces, selecteer de service-taak en maak
@@ -268,8 +311,9 @@ dubbele mail echt niet kan, stem dat dan af met je beheerder — en laat de ontv
 daarnaast op dubbele berichten controleren, bijvoorbeeld via een kenmerk in het onderwerp.
 
 **Versturen kan even duren.** Een verzending duurt maximaal 30 seconden, of 2 minuten bij grote
-bijlagen. Begrenst Microsoft het verkeer tijdelijk, dan wacht de plugin hooguit twee seconden en
-geeft de verzending daarna terug aan Valtimo, die het later opnieuw inplant. Zo houdt één trage
+bijlagen, plus de tijd voor het aanmelden bij Microsoft. Begrenst Microsoft het verkeer tijdelijk,
+dan wacht de plugin hooguit twee seconden en geeft de verzending daarna terug aan Valtimo, die het
+later opnieuw inplant. Zo houdt één trage
 mailserver de rest van de procesverwerking niet op. Vraag je beheerder wel om op de mailstap een
 herhaalschema in te stellen; zonder dat valt Valtimo terug op zijn standaard, die voor deze situatie
 meestal te kort is.
