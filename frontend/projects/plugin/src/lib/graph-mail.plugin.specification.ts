@@ -44,13 +44,11 @@ const graphMailPluginSpecification: PluginSpecification = {
       testRecipientPlaceholder: 'bijv. beheerder@gemeente.nl',
       connectionErrorFallback: 'Verbindingsfout',
       authenticationPluginConfiguration: 'Http Client Authentication-configuratie (aanbevolen)',
-      authenticationPluginConfigurationTooltip:
-        'De configuratie waarmee Graph Mail zich bij Microsoft aanmeldt: type Token exchange, met het token endpoint ' +
-        '(https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token), client ID, client secret en scope ' +
-        'https://graph.microsoft.com/.default, zonder audience. Haar certificaten (mTLS) gelden ook voor Graph.',
-      authenticationPluginConfigurationSelect: 'Kies…',
+      authenticationPluginConfigurationTooltip: 'Hiermee meldt Graph Mail zich aan bij Microsoft.',
+      authenticationPluginConfigurationEmpty: 'Aanmelden met client secret',
       authenticationPluginConfigurationNone:
-        'Er zijn geen Http Client Authentication-configuraties. Maak er eerst een aan (type Token exchange).',
+        'Er zijn geen Http Client Authentication-configuraties. Maak er eerst een aan van type Token exchange, ' +
+        'met scope https://graph.microsoft.com/.default en zonder audience.',
       authenticationPluginConfigurationMissing:
         'De gekozen configuratie bestaat niet meer of is niet beschikbaar. Kies een andere om op te kunnen slaan.',
       authenticationPluginConfigurationUnknown: 'Onbekende configuratie',
@@ -103,13 +101,11 @@ const graphMailPluginSpecification: PluginSpecification = {
       testRecipientPlaceholder: 'e.g. admin@organisation.gov',
       connectionErrorFallback: 'Connection error',
       authenticationPluginConfiguration: 'Http Client Authentication configuration (recommended)',
-      authenticationPluginConfigurationTooltip:
-        'The configuration Graph Mail logs in to Microsoft with: type Token exchange, with the token endpoint ' +
-        '(https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token), client ID, client secret and scope ' +
-        'https://graph.microsoft.com/.default, without audience. Its certificates (mTLS) apply to Graph too.',
-      authenticationPluginConfigurationSelect: 'Select…',
+      authenticationPluginConfigurationTooltip: 'Graph Mail uses this to log in to Microsoft.',
+      authenticationPluginConfigurationEmpty: 'Log in with client secret',
       authenticationPluginConfigurationNone:
-        'There are no Http Client Authentication configurations. Create one first (type Token exchange).',
+        'There are no Http Client Authentication configurations. Create one first of type Token exchange, ' +
+        'with scope https://graph.microsoft.com/.default and without audience.',
       authenticationPluginConfigurationMissing:
         'The selected configuration no longer exists or is not available. Select another one to save.',
       authenticationPluginConfigurationUnknown: 'Unknown configuration',

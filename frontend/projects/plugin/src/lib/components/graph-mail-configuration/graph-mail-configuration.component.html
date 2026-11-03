@@ -48,7 +48,7 @@
              background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box; font-family: inherit"
       [style.border-bottom]="loginSelectionUnknown || selectedLogin?.problem ? '2px solid #da1e28' : '1px solid #8d8d8d'"
     >
-      <option value="">{{ 'authenticationPluginConfigurationSelect' | pluginTranslate: pluginId | async }}</option>
+      <option value="">{{ 'authenticationPluginConfigurationEmpty' | pluginTranslate: pluginId | async }}</option>
       <option *ngFor="let option of loginOptions ?? []" [value]="option.id">{{ option.title }}</option>
       <option *ngIf="unknownLoginConfiguration" [value]="unknownLoginConfiguration">
         {{ 'authenticationPluginConfigurationUnknown' | pluginTranslate: pluginId | async }} ({{ unknownLoginConfiguration }})
