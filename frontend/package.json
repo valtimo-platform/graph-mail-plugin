@@ -60,7 +60,7 @@
         "@valtimo/dashboard-management": "13.48.0",
         "@valtimo/decision": "13.48.0",
         "@valtimo/document": "13.48.0",
-        "@valtimo/form": "13.48.0",
+        "@valtimo/form": "13.52.0",
         "@valtimo/form-flow-management": "13.48.0",
         "@valtimo/form-management": "13.48.0",
         "@valtimo/iko": "13.48.0",
