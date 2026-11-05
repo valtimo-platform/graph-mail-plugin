@@ -29,7 +29,7 @@
         "@angular/forms": "19.2.20",
         "@angular/localize": "19.2.20",
         "@angular/platform-browser": "19.2.20",
-        "@angular/platform-browser-dynamic": "19.2.20",
+        "@angular/platform-browser-dynamic": "22.2.4",
         "@angular/router": "19.2.20",
         "@bpmn-io/dmn-migrate": "0.5.0",
         "@bpmn-io/properties-panel": "3.26.4",
