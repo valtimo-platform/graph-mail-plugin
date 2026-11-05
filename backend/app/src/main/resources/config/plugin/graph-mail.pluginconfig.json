@@ -43,14 +43,6 @@
     }
   },
   {
-    "id": "9a3e2b10-5c4d-4e8f-a1b2-c3d4e5f60004",
-    "title": "Not a Graph login",
-    "pluginDefinitionKey": "http-client-authentication",
-    "properties": {
-      "authenticationType": "NONE"
-    }
-  },
-  {
     "id": "9a3e2b10-5c4d-4e8f-a1b2-c3d4e5f60005",
     "title": "Microsoft direct",
     "pluginDefinitionKey": "http-client-authentication",

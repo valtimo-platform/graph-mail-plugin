@@ -99,7 +99,6 @@ Central en npm staat:
 | **Graph login via gateway** (Http Client Authentication) | Token exchange zonder audience naar het token endpoint achter de gateway, met het clientcertificaat dat de gateway accepteert en het CA-certificaat van de gateway. |
 | **Graph login without client certificate** | Geen clientcertificaat: de gateway weigert het aanmelden met *No required SSL certificate was sent*; de melding noemt de configuratie en het certificaat. |
 | **Graph login, untrusted client certificate** | Haalt het token rechtstreeks bij de mock (`http://127.0.0.1:1080`), met een certificaat van een andere CA: de gateway weigert de Graph-verzoeken met *The SSL certificate error*. |
-| **Not a Graph login** | Type *None*: het Graph Mail-scherm zegt dat het type Token exchange moet zijn en laat niet opslaan. |
 | **Microsoft direct** | Token exchange zonder certificaten naar `login.microsoftonline.com`, voor een echte tenant (zie hieronder). |
 
 Kies in *Graph Mail (dummy)* bij **Http Client Authentication-configuratie** een andere en verstuur
@@ -693,21 +692,21 @@ zouden anders stil niets doen en het verkeer alsnog door de proxy sturen.
 ### Aanmelden via Http Client Authentication
 
 Graph Mail meldt zich bij Microsoft aan via de Http Client Authentication-configuratie in
-`authenticationPluginConfiguration`: type **Token exchange zonder audience**. Die doet het
-client-credentials-verzoek naar het token endpoint van Entra (met het clientcertificaat, als er een
-is) en bewaart het token tot kort voordat het verloopt. Graph Mail gebruikt daarvan
-`HttpClientAuthenticator.authenticationHeaders()` (per verzoek, de `Authorization`-header) en
+`authenticationPluginConfiguration`, van elk authenticatietype. Rechtstreeks bij Microsoft is dat
+**Token exchange zonder audience**: die doet het client-credentials-verzoek naar het token endpoint
+van Entra (met het clientcertificaat, als er een is) en bewaart het token tot kort voordat het
+verloopt. Via een gateway kan het ook een ander type zijn, bijvoorbeeld *Header* of *None* als de
+gateway zelf bij Microsoft aanmeldt. Graph Mail gebruikt daarvan
+`HttpClientAuthenticator.authenticationHeaders()` (per verzoek, álle headers die het type geeft) en
 `sslContext()` (de certificaten), op zijn eigen verbinding: proxy, timeouts, geen redirects en
 HTTP/1.1 blijven die van `graph-mail.http`. `applyAuth()` wordt bewust niet gebruikt, die zou de
 request factory vervangen. Inrichten vanuit het beheerscherm: zie de [handleiding](handleiding.md).
 
 - **Wat Graph Mail controleert** (`GraphMailLogin`), bij opslaan, bij deployen en per verzending: dat
-  de verwijzing een Http Client Authentication-configuratie is van type Token exchange, zonder
-  audience, met een scope. Niet waar het token endpoint naartoe wijst, en niet welke resource de
-  scope noemt (zie [handleiding](handleiding.md#wie-bij-het-secret-kan)). Een verkeerd endpoint of
-  een verkeerde scope geeft een aanmeldfout of een Graph-401 die de configuratie noemt. Het
-  beheerscherm doet dezelfde controles, omdat Valtimo een geweigerde opslag alleen als algemene fout
-  toont.
+  de verwijzing een bestaande Http Client Authentication-configuratie is. Niet het authenticatietype,
+  niet waar het token endpoint naartoe wijst, en niet welke resource de scope noemt (zie
+  [handleiding](handleiding.md#wie-bij-het-secret-kan)). Een verkeerd type, endpoint of scope geeft
+  een aanmeldfout of een Graph-401 die de configuratie noemt.
 - **Een verwijzing, geen getypeerde property.** De property is een gewone string met het id. Valtimo
   13.48 kan bij een property van een categorie-type niet zeggen wat er mis is met de keuze, en faalt
   bij een optionele als die leeg is — en optioneel moet ze zijn, voor configuraties met client secret. De sleutel bevat `PluginConfiguration`, zodat Valtimo's

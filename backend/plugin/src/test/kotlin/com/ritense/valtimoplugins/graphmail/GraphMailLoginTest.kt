@@ -88,12 +88,12 @@ class GraphMailLoginTest {
 
     // ── The reference ───────────────────────────────────────────────────
 
-    @Test fun `the login of a Token exchange configuration without audience is the header and certificates`() {
+    @Test fun `the login of an Http Client Authentication configuration is its headers and certificates`() {
         val authentication = login.resolve(LOGIN_ID)
 
         assertEquals(SOURCE, authentication.source)
         assertSame(sslContext, authentication.sslContext)
-        assertEquals("Bearer token-1", authentication.authorization())
+        assertEquals("Bearer token-1", authentication.headers().getFirst(HttpHeaders.AUTHORIZATION))
     }
 
     @Test fun `without certificates the login has none`() {
@@ -123,7 +123,7 @@ class GraphMailLoginTest {
     }
 
     @Test fun `without a reference a send logs in with the client secret of the configuration`() {
-        val clientSecretAuthentication = GraphMailAuthentication("the client secret", null) { "Bearer legacy" }
+        val clientSecretAuthentication = GraphMailAuthentication("the client secret", null) { HttpHeaders().apply { setBearerAuth("legacy") } }
         whenever(clientSecretLogin.resolve(credentials)).thenReturn(clientSecretAuthentication)
 
         assertSame(clientSecretAuthentication, login.resolve(null, credentials))
@@ -196,47 +196,30 @@ class GraphMailLoginTest {
         assertTrue(message.contains("'Graph login'") && message.contains("'smartdocuments'"), message)
     }
 
-    @Test fun `another authentication type is refused, naming it`() {
-        stored("""{"authenticationType": "BEARER"}""")
+    @Test fun `every authentication type is accepted`() {
+        listOf(
+            """{"authenticationType": "NONE"}""",
+            """{"authenticationType": "BEARER"}""",
+            """{"authenticationType": "HEADER", "authHeaderName": "X-Api-Key"}""",
+            """{"authenticationType": "SAML_TOKEN", "tokenEndpoint": "https://sts.example.nl/token"}""",
+            withProperty("audience", "graph"),
+            ENTRA_LOGIN.replace("https://graph.microsoft.com/.default", ""),
+        ).forEach {
+            stored(it)
 
-        val message = refusal()
-
-        assertTrue(message.contains(SOURCE) && message.contains("BEARER"), message)
-        assertTrue(message.contains("Token exchange"), message)
-    }
-
-    @Test fun `an audience is refused`() {
-        stored(withProperty("audience", "haal-centraal"))
-
-        assertTrue(refusal().contains("Leave Audience empty"))
-    }
-
-    @Test fun `a blank audience is no audience`() {
-        stored(withProperty("audience", " "))
-
-        login.validate(LOGIN_ID)
-    }
-
-    @Test fun `an audience stored as null is no audience`() {
-        stored(ENTRA_LOGIN.replace("\"clientId\"", "\"audience\": null, \"clientId\""))
-
-        login.validate(LOGIN_ID)
+            login.validate(LOGIN_ID)
+            login.resolve(LOGIN_ID)
+        }
     }
 
     @Test fun `a send repeats the checks, without creating the instance when they fail`() {
         val noReference = assertThrows<IllegalStateException> { login.resolve(null) }
-        stored(withProperty("audience", "haal-centraal"))
-        val audience = assertThrows<IllegalStateException> { login.resolve(LOGIN_ID) }
+        stored(ENTRA_LOGIN, plugin = "smartdocuments")
+        val otherPlugin = assertThrows<IllegalStateException> { login.resolve(LOGIN_ID) }
 
         assertTrue(noReference.message!!.contains("has no login"), noReference.message)
-        assertTrue(audience.message!!.contains("Leave Audience empty"), audience.message)
+        assertTrue(otherPlugin.message!!.contains("'smartdocuments'"), otherPlugin.message)
         verify(pluginService, never()).createInstance(any<PluginConfiguration>())
-    }
-
-    @Test fun `a configuration without scope is refused`() {
-        stored(ENTRA_LOGIN.replace("https://graph.microsoft.com/.default", ""))
-
-        assertTrue(refusal().contains("no scope"))
     }
 
     @Test fun `the token endpoint may point anywhere`() {
@@ -272,8 +255,8 @@ class GraphMailLoginTest {
         doThrow(
             TokenExchangeException("Could not obtain a token", cause),
         ).whenever(authenticator).authenticationHeaders()
-        val authorization = login.resolve(LOGIN_ID).authorization
-        return assertThrows<GraphMailException> { authorization() }
+        val headers = login.resolve(LOGIN_ID).headers
+        return assertThrows<GraphMailException> { headers() }
     }
 
     private fun httpError(status: HttpStatus) =
@@ -353,20 +336,18 @@ class GraphMailLoginTest {
         assertFalse(ex.message!!.contains("certificates of"), ex.message)
     }
 
-    @Test fun `a login without an Authorization header fails instead of sending without one`() {
-        whenever(authenticator.authenticationHeaders()).thenReturn(HttpHeaders())
-        val authorization = login.resolve(LOGIN_ID).authorization
+    @Test fun `the login supplies every header of the configuration, also without Authorization`() {
+        val apiKey = HttpHeaders().apply { set("X-Api-Key", "key-1") }
+        whenever(authenticator.authenticationHeaders()).thenReturn(apiKey)
 
-        val ex = assertThrows<IllegalStateException> { authorization() }
-
-        assertTrue(ex.message!!.contains("supplied no Authorization header"), ex.message)
+        assertEquals(apiKey, login.resolve(LOGIN_ID).headers())
     }
 
     @Test fun `addresses in a login failure are masked`() {
         val unreachable = loginFailure(ResourceAccessException("I/O error", ConnectException("geheim@gemeente.nl")))
         doThrow(IllegalArgumentException("geheim@gemeente.nl")).whenever(authenticator).authenticationHeaders()
-        val authorization = login.resolve(LOGIN_ID).authorization
-        val other = assertThrows<GraphMailPermanentException> { authorization() }
+        val headers = login.resolve(LOGIN_ID).headers
+        val other = assertThrows<GraphMailPermanentException> { headers() }
 
         listOf(unreachable, other).forEach {
             assertFalse(it.message!!.contains("geheim@gemeente.nl"), it.message)
@@ -406,9 +387,9 @@ class GraphMailLoginTest {
             .thenThrow(
                 IllegalArgumentException("Authentication type TOKEN_EXCHANGE requires the properties: clientSecret"),
             )
-        val authorization = login.resolve(LOGIN_ID).authorization
+        val headers = login.resolve(LOGIN_ID).headers
 
-        val ex = assertThrows<GraphMailPermanentException> { authorization() }
+        val ex = assertThrows<GraphMailPermanentException> { headers() }
 
         assertTrue(ex.message!!.contains("requires the properties: clientSecret"), ex.message)
         assertTrue(ex.message!!.contains(SOURCE), ex.message)

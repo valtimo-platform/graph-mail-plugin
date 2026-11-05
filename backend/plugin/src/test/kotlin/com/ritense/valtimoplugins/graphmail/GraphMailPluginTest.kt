@@ -44,6 +44,7 @@ import java.io.ByteArrayInputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import org.springframework.http.HttpHeaders
 
 private const val VALID_CONTENT_UUID = "22222222-2222-2222-2222-222222222222"
 private const val VALID_UUID = "11111111-1111-1111-1111-111111111111"
@@ -54,7 +55,7 @@ class GraphMailPluginTest {
     private val storage: TemporaryResourceStorageService = mock()
     private val execution: DelegateExecution = mock()
     private val eventPublisher: ApplicationEventPublisher = mock()
-    private val graphLogin = GraphMailAuthentication("the login", null) { "Bearer token" }
+    private val graphLogin = GraphMailAuthentication("the login", null) { HttpHeaders().apply { setBearerAuth("token") } }
     private val login: GraphMailLogin = mock { on { resolve(LOGIN_ID) } doReturn graphLogin }
     private val pluginService: PluginService = mock()
     private lateinit var plugin: GraphMailPlugin

@@ -27,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir
 import org.springframework.boot.ssl.SslBundle
 import org.springframework.boot.ssl.pem.PemSslStoreBundle
 import org.springframework.boot.ssl.pem.PemSslStoreDetails
+import org.springframework.http.HttpHeaders
 import org.springframework.web.client.RestClient
 import java.nio.file.Files
 import java.nio.file.Path
@@ -127,7 +128,7 @@ class GraphMailClientMtlsTest {
 
     // The login of an Http Client Authentication configuration with these certificates; its token request is that
     // plugin's own (tested there, and classified by GraphMailLogin).
-    private fun login(sslContext: SSLContext?) = GraphMailAuthentication(SOURCE, sslContext) { "Bearer token-1" }
+    private fun login(sslContext: SSLContext?) = GraphMailAuthentication(SOURCE, sslContext) { HttpHeaders().apply { setBearerAuth("token-1") } }
 
     // Sends as the plugin does with the client GraphMailAutoConfiguration builds.
     private fun send(

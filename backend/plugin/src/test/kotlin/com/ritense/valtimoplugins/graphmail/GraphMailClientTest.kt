@@ -41,6 +41,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpHeaders
 import org.springframework.http.client.JdkClientHttpRequestFactory
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.web.client.RestClient
@@ -72,7 +73,7 @@ class GraphMailClientTest {
         GraphMailAuthentication("the login", null) {
             loginCalls++
             loginFailures.removeFirstOrNull()?.let { throw it }
-            "Bearer $token"
+            HttpHeaders().apply { setBearerAuth(token) }
         }
 
     private fun recipients(vararg addresses: String) = addresses.map { GraphRecipient(GraphEmailAddress(address = it)) }
@@ -145,7 +146,7 @@ class GraphMailClientTest {
 
     // ── Login ────────────────────────────────────────────────────────────
 
-    @Test fun `asks the login for the Authorization header on every attempt`() {
+    @Test fun `asks the login for the headers on every attempt`() {
         wireMock.stubFor(
             post(urlPathMatching(mailPath))
                 .inScenario("503-then-ok")
@@ -201,7 +202,7 @@ class GraphMailClientTest {
 
     // ── SendMail success ────────────────────────────────────────────────────
 
-    @Test fun `sends mail successfully with the Authorization header of the login`() {
+    @Test fun `sends mail successfully with the headers of the login`() {
         wireMock.stubFor(
             post(urlPathMatching(mailPath))
                 .withHeader("Authorization", equalTo("Bearer $token"))
@@ -210,6 +211,25 @@ class GraphMailClientTest {
         sendBasic()
         assertEquals(1, loginCalls)
         wireMock.verify(1, postRequestedFor(urlPathMatching(mailPath)))
+    }
+
+    @Test fun `sends every header of the login, not just Authorization`() {
+        wireMock.stubFor(post(urlPathMatching(mailPath)).willReturn(aResponse().withStatus(202)))
+        val apiKeyLogin =
+            GraphMailAuthentication("the gateway login", null) {
+                HttpHeaders().apply {
+                    setBearerAuth(token)
+                    set("X-Api-Key", "key-1")
+                }
+            }
+
+        sendBasicWith(apiKeyLogin)
+
+        wireMock.verify(
+            postRequestedFor(urlPathMatching(mailPath))
+                .withHeader("Authorization", equalTo("Bearer $token"))
+                .withHeader("X-Api-Key", equalTo("key-1")),
+        )
     }
 
     @Test fun `saveToSentItems false in JSON`() {
@@ -289,13 +309,13 @@ class GraphMailClientTest {
         GraphMailAuthentication(
             "the login",
             null,
-            rejected = { authorization ->
-                rejectedTokens.add(authorization)
+            rejected = { headers ->
+                rejectedTokens.add(headers.getFirst(HttpHeaders.AUTHORIZATION)!!)
                 true
             },
         ) {
             loginCalls++
-            "Bearer token-$loginCalls"
+            HttpHeaders().apply { setBearerAuth("token-$loginCalls") }
         }
 
     private fun sendBasicWith(authentication: GraphMailAuthentication) =
@@ -933,7 +953,7 @@ class GraphMailClientTest {
 
         assertThrows(GraphMailPermanentException::class.java) {
             cloudClient.sendMail(
-                GraphMailAuthentication("the login", SSLContext.getDefault()) { "Bearer $token" },
+                GraphMailAuthentication("the login", SSLContext.getDefault()) { HttpHeaders().apply { setBearerAuth(token) } },
                 OutboundMail(
                     senderMailbox = mailbox,
                     toRecipients = recipients("jan@test.nl"),

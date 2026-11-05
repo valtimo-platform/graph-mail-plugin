@@ -67,11 +67,13 @@ class GraphMailClientSecretLogin(
             source = "the client secret of this Graph Mail configuration (tenant ${credentials.tenantId})",
             sslContext = null,
             // Always a fresh token next: this one is dropped, or a concurrent send already replaced it.
-            rejected = { authorization ->
-                tokenCache.invalidateIfMatches(key, authorization.removePrefix(BEARER))
+            rejected = { headers ->
+                headers.getFirst(HttpHeaders.AUTHORIZATION)?.let {
+                    tokenCache.invalidateIfMatches(key, it.removePrefix(BEARER))
+                }
                 true
             },
-        ) { BEARER + tokenCache.getOrFetch(key) { fetchToken(credentials) } }
+        ) { HttpHeaders().apply { setBearerAuth(tokenCache.getOrFetch(key) { fetchToken(credentials) }) } }
     }
 
     // A hash of clientSecret is part of the cache key — not just tenantId+clientId — so a

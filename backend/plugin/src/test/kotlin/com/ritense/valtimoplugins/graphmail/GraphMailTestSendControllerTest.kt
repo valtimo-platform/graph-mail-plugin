@@ -33,6 +33,7 @@ import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.springframework.context.ApplicationEventPublisher
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.security.core.Authentication
 import java.util.concurrent.ConcurrentHashMap
@@ -52,7 +53,7 @@ class GraphMailTestSendControllerTest {
         mock<Authentication>().also {
             whenever(it.name).thenReturn("test-admin")
         }
-    private val graphLogin = GraphMailAuthentication("the login", null) { "Bearer token" }
+    private val graphLogin = GraphMailAuthentication("the login", null) { HttpHeaders().apply { setBearerAuth("token") } }
     private val login: GraphMailLogin = mock { on { resolve(LOGIN_ID) } doReturn graphLogin }
     private lateinit var controller: GraphMailTestSendController
 

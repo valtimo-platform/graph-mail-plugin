@@ -14,13 +14,9 @@ import {BehaviorSubject, combineLatest, Observable, of, Subscription, take} from
 import {catchError, filter, map, switchMap} from 'rxjs/operators';
 import {GraphMailPluginConfig} from '../../models';
 
-// Why a configuration can't log in to Microsoft, as a translation key; null when it can.
-type LoginProblem = 'loginNotTokenExchange' | 'loginHasAudience' | 'loginWithoutScope' | null;
-
 interface LoginOption {
   id: string;
   title: string;
-  problem: LoginProblem;
 }
 
 interface TestSendStatus {
@@ -239,11 +235,6 @@ export class GraphMailPluginConfigurationComponent
     return !!this.loginConfigurationValue && this.loginConfigurationValue === this.unknownLoginConfiguration;
   }
 
-  // The selected configuration, when it is one of the options.
-  get selectedLogin(): LoginOption | null {
-    return this.loginOptions?.find(option => option.id === this.loginConfigurationValue) ?? null;
-  }
-
   onLoginChange(): void {
     const formValue = this.formValue$.getValue();
     if (formValue) this.updateValidAndVisibility(formValue);
@@ -296,24 +287,10 @@ export class GraphMailPluginConfigurationComponent
       .subscribe(configurations => {
         this.loginOptions = configurations
           .filter(configuration => !!configuration.id)
-          .map(configuration => ({
-            id: configuration.id as string,
-            title: configuration.title,
-            problem: GraphMailPluginConfigurationComponent.loginProblemOf(configuration.properties as any),
-          }));
+          .map(configuration => ({id: configuration.id as string, title: configuration.title}));
         this.updateUnknownLogin();
         this.onLoginChange();
       });
-  }
-
-  // The checks of GraphMailLogin in the backend, on the non-secret properties the list returns. Here because
-  // Valtimo shows a refused save only as a generic error.
-  private static loginProblemOf(properties: Record<string, unknown> | null | undefined): LoginProblem {
-    const text = (name: string): string => `${properties?.[name] ?? ''}`.trim();
-    if (text('authenticationType') !== 'TOKEN_EXCHANGE') return 'loginNotTokenExchange';
-    if (text('audience')) return 'loginHasAudience';
-    if (!text('scope')) return 'loginWithoutScope';
-    return null;
   }
 
   private updateUnknownLogin(): void {
@@ -337,7 +314,7 @@ export class GraphMailPluginConfigurationComponent
 
   private updateValidAndVisibility(formValue: GraphMailPluginConfig): void {
     const loginUsable =
-      (!!this.loginConfigurationValue && !this.loginSelectionUnknown && !this.selectedLogin?.problem) ||
+      (!!this.loginConfigurationValue && !this.loginSelectionUnknown) ||
       this.clientSecretLoginUsable;
 
     const valid = !!(

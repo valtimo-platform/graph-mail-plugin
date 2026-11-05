@@ -41,23 +41,22 @@ private const val AUTHENTICATOR_CLASS = "com.ritense.valtimoplugins.httpclientau
 private val AUTHENTICATOR_METHODS = listOf("authenticationHeaders", "sslContext")
 
 private const val HTTP_CLIENT_AUTHENTICATION_KEY = "http-client-authentication"
-private const val TOKEN_EXCHANGE = "TOKEN_EXCHANGE"
 
 // Statuses of the token endpoint that may clear by themselves.
 private val RETRYABLE_LOGIN_STATUSES = setOf(408, 429)
 
 /**
- * How one send logs in: the `Authorization` header to send, fetched per request ([authorization]; the token is cached
- * by the login), and the certificates for the connection, null without them. [source] names the configuration they
- * come from, for messages. [rejected] is called with a header Graph refused (401), so a login that caches its own
- * token can drop it; it returns whether the next [authorization] fetches a fresh token, which the client then tries
- * once. The Http Client Authentication plugin keeps its cache to itself, so its login returns false.
+ * How one send logs in: the headers to send, fetched per request ([headers]; a token is cached by the login), and the
+ * certificates for the connection, null without them. [source] names the configuration they come from, for messages.
+ * [rejected] is called with the headers Graph refused (401), so a login that caches its own token can drop it; it
+ * returns whether the next [headers] fetches a fresh token, which the client then tries once. The Http Client
+ * Authentication plugin keeps its cache to itself, so its login returns false.
  */
 class GraphMailAuthentication(
     val source: String,
     val sslContext: SSLContext?,
-    val rejected: (String) -> Boolean = { false },
-    val authorization: () -> String,
+    val rejected: (HttpHeaders) -> Boolean = { false },
+    val headers: () -> HttpHeaders,
 )
 
 /**
@@ -87,15 +86,16 @@ internal fun httpClientAuthenticationProblem(
 
 /**
  * The login of a Graph Mail configuration. Two kinds:
- * - the `authenticationPluginConfiguration` reference: an Http Client Authentication configuration of type Token
- *   exchange without audience, which does the client-credentials request to Microsoft Entra ID (with its client
- *   certificate, if any) and supplies the certificates for the Graph calls. Used whenever it is filled in.
+ * - the `authenticationPluginConfiguration` reference: an Http Client Authentication configuration of any
+ *   authentication type, which supplies the headers (e.g. a Token exchange without audience doing the
+ *   client-credentials request to Microsoft Entra ID, or the header a gateway expects) and the certificates for the
+ *   Graph calls. Used whenever it is filled in.
  * - otherwise the deprecated 1.x login, with the configuration's own tenantId, clientId and clientSecret
  *   ([GraphMailClientSecretLogin]), so configurations from 1.x keep sending after an upgrade. Logged as deprecated.
  *
- * Only checks that the Http Client Authentication configuration can supply a token, not where its token endpoint
- * points: limiting where the secret can go is left to the network. The checks read the stored properties, so Graph
- * Mail only needs the [HttpClientAuthenticator] interface, not the plugin class (which the Http Client Authentication
+ * Only checks that the reference is an Http Client Authentication configuration, not its type or where its token
+ * endpoint points: limiting where the secret can go is left to the network. The checks read the stored configuration,
+ * so Graph Mail only needs the [HttpClientAuthenticator] interface, not the plugin class (which the Http Client Authentication
  * plugin generates at startup). That interface is only touched in [HttpClientAuthenticatorCalls], after
  * [httpClientAuthenticationProblem] found it.
  */
@@ -171,7 +171,7 @@ class GraphMailLogin(
             }
         val tokenEndpointHost = tokenEndpointHostOf(configuration.properties)
         return GraphMailAuthentication(source, sslContext) {
-            authorization(authenticator, source, tokenEndpointHost, sslContext != null)
+            headers(authenticator, source, tokenEndpointHost, sslContext != null)
         }
     }
 
@@ -196,44 +196,20 @@ class GraphMailLogin(
                 "$AUTHENTICATION_PLUGIN_CONFIGURATION_FIELD is a '${configuration.pluginDefinition.key}' " +
                 "configuration. Select an Http Client Authentication configuration."
         }
-        checkTokenLogin(configuration.properties, describe(configuration))
         return configuration
     }
 
-    // What the Microsoft login needs; the rest (endpoint, client ID, secret) Http Client Authentication checks itself.
-    private fun checkTokenLogin(
-        properties: ObjectNode?,
-        source: String,
-    ) {
-        val type = textOf(properties, "authenticationType")
-        check(type == TOKEN_EXCHANGE) {
-            "$source has authentication type ${type ?: "(none)"}. Graph Mail needs type Token exchange " +
-                "($TOKEN_EXCHANGE) with the token endpoint, client ID, client secret and scope of the app " +
-                "registration in Microsoft Entra ID."
-        }
-        check(textOf(properties, "audience") == null) {
-            "$source has an audience. Leave Audience empty: Microsoft Entra ID only does the client credentials " +
-                "request, not a token exchange."
-        }
-        check(textOf(properties, "scope") != null) {
-            "$source has no scope. Fill in Scope, e.g. https://graph.microsoft.com/.default."
-        }
-    }
-
-    private fun authorization(
+    private fun headers(
         authenticator: Any,
         source: String,
         tokenEndpointHost: String,
         withCertificates: Boolean,
-    ): String {
-        val headers =
-            try {
-                HttpClientAuthenticatorCalls.authenticationHeaders(authenticator)
-            } catch (ex: Exception) {
-                throw loginFailure(ex, source, tokenEndpointHost, withCertificates)
-            }
-        return checkNotNull(headers.getFirst(HttpHeaders.AUTHORIZATION)) { "$source supplied no Authorization header" }
-    }
+    ): HttpHeaders =
+        try {
+            HttpClientAuthenticatorCalls.authenticationHeaders(authenticator)
+        } catch (ex: Exception) {
+            throw loginFailure(ex, source, tokenEndpointHost, withCertificates)
+        }
 
     // Classified on the cause chain: http auth wraps the failure of its token request. Never the message of an HTTP
     // error, which may carry the response body, and a token endpoint may echo the form with the secret.
@@ -283,8 +259,8 @@ class GraphMailLogin(
             )
         }
         return GraphMailPermanentException(
-            "The token endpoint $host refused the login of $source (HTTP $status): check the tenant in the token " +
-                "endpoint, the client ID, the client secret (expired?) and the scope there$certificates.",
+            "The token endpoint $host refused the login of $source (HTTP $status): check the token endpoint, the " +
+                "client ID, the client secret (expired?) and the scope there$certificates.",
             ex,
             statusCode = status,
         )

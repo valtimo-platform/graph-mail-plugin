@@ -71,6 +71,11 @@ Authentication** en maak een configuratie aan:
 Loopt het verkeer naar Microsoft via een gateway met clientcertificaat, vul dan in dezelfde
 configuratie ook de certificaten in; zie *Via een gateway met clientcertificaat* hieronder.
 
+Graph Mail accepteert elk authenticatietype van Http Client Authentication en stuurt alle headers
+mee die de configuratie geeft. Meldt een gateway zelf bij Microsoft aan, kies dan het type dat de
+gateway verwacht (bijvoorbeeld *Header* met een API-sleutel, of *None* als alleen het
+clientcertificaat telt).
+
 ## Stap 2 — Graph Mail-configuratie aanmaken
 
 Ga naar **Admin → Plugins**, kies **Microsoft Graph Mail** en maak een nieuwe configuratie aan.
@@ -82,9 +87,7 @@ Ga naar **Admin → Plugins**, kies **Microsoft Graph Mail** en maak een nieuwe 
 | **Http Client Authentication-configuratie** | Aanbevolen. De configuratie uit stap 1. Zie *Bestaande configuraties met client secret* hieronder als je die (nog) niet gebruikt. |
 | **Afzender testmail (e-mailadres)** | Optioneel. Het afzenderadres dat standaard wordt voorgesteld bij de testmail hieronder. Heeft geen invloed op het versturen vanuit processen. |
 
-Het scherm controleert de gekozen configuratie meteen. Kan die zich niet bij Microsoft aanmelden,
-dan staat eronder wat je moet aanpassen, en kun je niet opslaan. Of de Client ID en het secret
-kloppen, blijkt pas bij de testmail (stap 3).
+Of de gekozen configuratie zich bij Microsoft kan aanmelden, blijkt pas bij de testmail (stap 3).
 
 Je kunt meerdere Graph Mail-configuraties naast elkaar aanmaken, bijvoorbeeld één per afdeling of
 per tenant. Bij het koppelen aan een processtap kies je welke je gebruikt.

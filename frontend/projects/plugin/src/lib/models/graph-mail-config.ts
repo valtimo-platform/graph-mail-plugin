@@ -5,8 +5,8 @@ interface GraphMailPluginConfig extends PluginConfigurationData {
   // Required — the backend refuses every send when this is empty (deny-by-default).
   allowedSenders: string;
   testSenderMailbox?: string;
-  // Id of the Http Client Authentication configuration Graph Mail logs in to Microsoft with (type Token exchange,
-  // without audience), and whose certificates it uses.
+  // Id of the Http Client Authentication configuration (any authentication type) whose headers and certificates
+  // Graph Mail sends to Microsoft, or to a gateway in between.
   authenticationPluginConfiguration?: string;
   // The deprecated client-secret login of 1.x, used while authenticationPluginConfiguration is empty.
   tenantId?: string;
