@@ -150,7 +150,7 @@
         "@angular/compiler-cli": "19.2.20",
         "@angular/language-service": "19.2.20",
         "@types/dropzone": "5.7.9",
-        "@types/jasmine": "5.1.7",
+        "@types/jasmine": "7.0.0",
         "@types/jasminewd2": "2.0.13",
         "@types/lodash": "4.17.16",
         "@types/node": "22.15.3",
