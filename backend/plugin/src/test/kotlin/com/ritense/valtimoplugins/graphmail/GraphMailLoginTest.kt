@@ -123,7 +123,8 @@ class GraphMailLoginTest {
     }
 
     @Test fun `without a reference a send logs in with the client secret of the configuration`() {
-        val clientSecretAuthentication = GraphMailAuthentication("the client secret", null) { HttpHeaders().apply { setBearerAuth("legacy") } }
+        val clientSecretAuthentication =
+            GraphMailAuthentication("the client secret", null) { HttpHeaders().apply { setBearerAuth("legacy") } }
         whenever(clientSecretLogin.resolve(credentials)).thenReturn(clientSecretAuthentication)
 
         assertSame(clientSecretAuthentication, login.resolve(null, credentials))

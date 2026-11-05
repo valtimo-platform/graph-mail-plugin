@@ -953,7 +953,10 @@ class GraphMailClientTest {
 
         assertThrows(GraphMailPermanentException::class.java) {
             cloudClient.sendMail(
-                GraphMailAuthentication("the login", SSLContext.getDefault()) { HttpHeaders().apply { setBearerAuth(token) } },
+                GraphMailAuthentication(
+                    "the login",
+                    SSLContext.getDefault(),
+                ) { HttpHeaders().apply { setBearerAuth(token) } },
                 OutboundMail(
                     senderMailbox = mailbox,
                     toRecipients = recipients("jan@test.nl"),
