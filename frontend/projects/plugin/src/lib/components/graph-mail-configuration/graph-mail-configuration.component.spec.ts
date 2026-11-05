@@ -261,6 +261,63 @@ describe('GraphMailPluginConfigurationComponent', () => {
     expect(values[0].clientId).toBeUndefined();
   });
 
+  // ── The Graph API URL (baseUrl) ───────────────────────────────────────────────────
+
+  it('saves no Graph API URL when none is filled in, so existing configurations keep using Microsoft', () => {
+    const {save$, values} = withStoredReference('login-1');
+    component.formValueChange({...baseFormValue});
+
+    save$.next();
+
+    expect(values[0].baseUrl).toBeUndefined();
+  });
+
+  it('shows and saves the stored Graph API URL, trimmed', () => {
+    const {save$, values} = withStoredReference('login-1', [entraLogin], {baseUrl: 'https://gw.example.nl/graph'});
+    component.formValueChange({...baseFormValue});
+
+    expect(component.baseUrlValue).toBe('https://gw.example.nl/graph');
+
+    component.baseUrlValue = ' https://gw.example.nl/other ';
+    component.onLoginChange();
+    save$.next();
+
+    expect(values[0].baseUrl).toBe('https://gw.example.nl/other');
+  });
+
+  it('refuses a Graph API URL that is not a plain https URL', () => {
+    withStoredReference('login-1');
+    component.formValueChange({...baseFormValue});
+
+    [
+      'http://gw.example.nl',
+      'gw.example.nl',
+      'https://user@gw.example.nl',
+      'https://gw.example.nl/graph?x=1',
+      'https://gw.example.nl/graph#x',
+      'https://gw.example.nl/gr aph',
+    ].forEach(url => {
+      component.baseUrlValue = url;
+      component.onLoginChange();
+      expect(component.baseUrlInvalid).withContext(url).toBeTrue();
+      expect(validityOf(component)).withContext(url).toBeFalse();
+    });
+  });
+
+  it('clears the Graph API URL when the client-secret login is chosen instead', () => {
+    const {save$, values} = withStoredReference('login-1', [entraLogin], {baseUrl: 'https://gw.example.nl'});
+    component.formValueChange({...baseFormValue});
+    component.loginConfigurationValue = '';
+    component.clientSecretTenantId = 'contoso.onmicrosoft.com';
+    component.clientSecretClientId = 'client-1';
+    component.clientSecretValue = 'secret-1';
+    component.onLoginChange();
+
+    save$.next();
+
+    expect(values[0].baseUrl).toBeUndefined();
+  });
+
   // ── The deprecated client-secret login of 1.x ──────────────────────────────────────────
 
   const clientSecretLogin = {tenantId: '00000000-0000-0000-0000-000000000001', clientId: 'client-1'};

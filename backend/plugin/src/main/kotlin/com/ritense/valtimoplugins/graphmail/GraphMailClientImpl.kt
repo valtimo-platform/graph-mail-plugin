@@ -152,20 +152,36 @@ class GraphMailClientImpl(
     private val uploadHostSuffixes: Set<String>? = null,
     // Builds the client for a set of certificates.
     private val certificateRestClients: (SSLContext) -> RestClient,
+    // Whether an upload URL on exactly graphBaseUrl's origin is accepted, besides uploadHostSuffixes. Always without
+    // those (a WireMock or sandbox endpoint), and for a Graph API URL set in the Graph Mail configuration: a gateway
+    // there may hand out upload URLs on its own URL as well as pass on Microsoft's.
+    private val uploadsOnGraphOrigin: Boolean = uploadHostSuffixes == null,
 ) : GraphMailClient {
     private val logger = LoggerFactory.getLogger(GraphMailClientImpl::class.java)
 
     // The client for this send: the shared one, or one with the certificates of the login. The interceptor reports a
     // gateway's rejection of the certificates before any retry logic here sees it, so every request path is covered
     // and nothing else in this class depends on certificates.
+    // The Graph API URL of the Graph Mail configuration comes with the login and replaces graphBaseUrl for this send.
     private fun forAuthentication(authentication: GraphMailAuthentication): GraphMailClientImpl {
-        val sslContext = authentication.sslContext ?: return this
-        val certificateClient =
-            certificateRestClients(sslContext)
-                .mutate()
-                .requestInterceptor(CertificateRejectionInterceptor(authentication.source, graphBaseUrl))
-                .build()
-        return GraphMailClientImpl(certificateClient, graphBaseUrl, uploadHostSuffixes, certificateRestClients)
+        val sslContext = authentication.sslContext
+        val configuredUrl = authentication.graphBaseUrl
+        if (sslContext == null && configuredUrl == null) return this
+        val baseUrl = configuredUrl ?: graphBaseUrl
+        val client =
+            sslContext?.let {
+                certificateRestClients(it)
+                    .mutate()
+                    .requestInterceptor(CertificateRejectionInterceptor(authentication.source, baseUrl))
+                    .build()
+            } ?: restClient
+        return GraphMailClientImpl(
+            restClient = client,
+            graphBaseUrl = baseUrl,
+            uploadHostSuffixes = uploadHostSuffixes,
+            certificateRestClients = certificateRestClients,
+            uploadsOnGraphOrigin = uploadsOnGraphOrigin || configuredUrl != null,
+        )
     }
 
     // Up to a fifth more than backoffMs, so retries of concurrent sends spread out.
@@ -780,25 +796,28 @@ class GraphMailClientImpl(
     private fun validateUploadUrl(uploadUrl: String) {
         val uri = runCatching { java.net.URI.create(uploadUrl) }.getOrNull()
         val host = uri?.host
-        val valid =
-            if (uploadHostSuffixes != null) {
+        val onCloudHost =
+            uploadHostSuffixes != null &&
                 uri?.scheme == "https" &&
-                    host != null &&
-                    uploadHostSuffixes.any { host == it.removePrefix(".") || host.endsWith(it) }
-            } else {
-                // Sandbox/test endpoint: accept only the exact origin we are already talking to —
-                // scheme, host *and* port. Host alone is not enough: with a sandbox on
-                // http://localhost:8089, an upload URL of http://localhost:2375 shares the host and
-                // would be accepted, sending attachment bytes to the Docker daemon. Any other
-                // service bound to loopback is reachable the same way.
-                val expected = runCatching { java.net.URI.create(graphBaseUrl) }.getOrNull()
-                uri != null &&
-                    expected != null &&
-                    uri.scheme == expected.scheme &&
-                    host != null &&
-                    host == expected.host &&
-                    effectivePort(uri) == effectivePort(expected)
-            }
+                host != null &&
+                uploadHostSuffixes.any { host == it.removePrefix(".") || host.endsWith(it) }
+        // Sandbox/test endpoint or gateway: accept only the exact origin we are already talking to —
+        // scheme, host *and* port. Host alone is not enough: with a sandbox on
+        // http://localhost:8089, an upload URL of http://localhost:2375 shares the host and
+        // would be accepted, sending attachment bytes to the Docker daemon. Any other
+        // service bound to loopback is reachable the same way.
+        val onGraphOrigin =
+            uploadsOnGraphOrigin &&
+                run {
+                    val expected = runCatching { java.net.URI.create(graphBaseUrl) }.getOrNull()
+                    uri != null &&
+                        expected != null &&
+                        uri.scheme == expected.scheme &&
+                        host != null &&
+                        host == expected.host &&
+                        effectivePort(uri) == effectivePort(expected)
+                }
+        val valid = onCloudHost || onGraphOrigin
         // Typed rather than require(): an IllegalArgumentException would be classified as
         // PERMANENT_INPUT and tell the administrator to correct the process data, when the actual
         // cause is an unexpected host in a Graph response.
@@ -814,7 +833,10 @@ class GraphMailClientImpl(
                 "Rejected upload URL host '{}' (scheme '{}'); accepted for this cloud: {}",
                 host,
                 uri?.scheme,
-                uploadHostSuffixes ?: "exactly the configured Graph host",
+                listOfNotNull(
+                    uploadHostSuffixes,
+                    "exactly the configured Graph host".takeIf { uploadsOnGraphOrigin },
+                ),
             )
             throw GraphMailPermanentException(
                 "Upload URL returned by the Graph API failed host validation",

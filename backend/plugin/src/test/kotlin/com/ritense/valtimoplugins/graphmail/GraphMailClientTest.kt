@@ -30,6 +30,7 @@ import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.put
 import com.github.tomakehurst.wiremock.client.WireMock.putRequestedFor
+import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig
 import com.github.tomakehurst.wiremock.http.Fault
@@ -954,6 +955,80 @@ class GraphMailClientTest {
         assertThrows(GraphMailPermanentException::class.java) {
             cloudClient.sendMail(
                 GraphMailAuthentication("the login", SSLContext.getDefault()) { HttpHeaders().apply { setBearerAuth(token) } },
+                OutboundMail(
+                    senderMailbox = mailbox,
+                    toRecipients = recipients("jan@test.nl"),
+                    subject = "T",
+                    bodyHtml = "<p>B</p>",
+                    attachments = listOf(resolvedAttachment("f.bin", UPLOAD_SESSION_MIN_BYTES.toInt())),
+                ),
+            )
+        }
+
+        wireMock.verify(0, putRequestedFor(anyUrl()))
+    }
+
+    // ── The Graph API URL of the configuration, from the login ────────────────
+
+    private fun gatewayLogin(gatewayUrl: String) =
+        GraphMailAuthentication("the gateway login", null, graphBaseUrl = gatewayUrl) {
+            HttpHeaders().apply { setBearerAuth(token) }
+        }
+
+    @Test fun `the Graph API URL in the login replaces the deployment's Graph URL`() {
+        val microsoftClient =
+            GraphMailClientImpl(
+                restClient = restClientForTests,
+                graphBaseUrl = "https://graph.microsoft.com",
+                uploadHostSuffixes = setOf(".sharepoint.com"),
+                certificateRestClients = noCertificates,
+            )
+        wireMock.stubFor(post(urlPathMatching("/gateway/graph/.*")).willReturn(aResponse().withStatus(202)))
+
+        microsoftClient.sendMail(
+            gatewayLogin("${wireMock.baseUrl()}/gateway/graph"),
+            OutboundMail(
+                senderMailbox = mailbox,
+                toRecipients = recipients("jan@test.nl"),
+                subject = "T",
+                bodyHtml = "<p>B</p>",
+            ),
+        )
+
+        wireMock.verify(
+            postRequestedFor(urlPathEqualTo("/gateway/graph/v1.0/users/$mailbox/sendMail"))
+                .withHeader("Authorization", equalTo("Bearer $token")),
+        )
+    }
+
+    @Test fun `a gateway may hand out upload URLs on its own origin, besides the cloud's upload hosts`() {
+        stubDraftCreate()
+        stubUploadSession("${wireMock.baseUrl()}/upload/s1")
+        wireMock.stubFor(put(anyUrl()).willReturn(aResponse().withStatus(200)))
+        stubSendDraft()
+
+        clientForCloud(setOf(".sharepoint.com")).sendMail(
+            gatewayLogin(wireMock.baseUrl()),
+            OutboundMail(
+                senderMailbox = mailbox,
+                toRecipients = recipients("jan@test.nl"),
+                subject = "T",
+                bodyHtml = "<p>B</p>",
+                attachments = listOf(resolvedAttachment("f.bin", UPLOAD_SESSION_MIN_BYTES.toInt())),
+            ),
+        )
+
+        wireMock.verify(1, putRequestedFor(urlPathEqualTo("/upload/s1")))
+    }
+
+    @Test fun `a gateway's upload URL on another port of its host is refused`() {
+        stubDraftCreate()
+        stubUploadSession("http://localhost:2375/upload/s1")
+        wireMock.stubFor(delete(anyUrl()).willReturn(aResponse().withStatus(204)))
+
+        assertThrows(GraphMailPermanentException::class.java) {
+            clientForCloud(setOf(".sharepoint.com")).sendMail(
+                gatewayLogin(wireMock.baseUrl()),
                 OutboundMail(
                     senderMailbox = mailbox,
                     toRecipients = recipients("jan@test.nl"),

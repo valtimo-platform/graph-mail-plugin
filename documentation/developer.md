@@ -222,7 +222,7 @@ operaton:
 
 graph-mail:
   http:
-    graph-base-url: https://graph.microsoft.com         # default
+    graph-base-url: https://graph.microsoft.com         # default; per configuratie te overschrijven met baseUrl
     connect-timeout-seconds: 10
     read-timeout-seconds: 30
     attachment-concurrency: 8                # max gelijktijdige verzendingen mét bijlagen
@@ -296,11 +296,13 @@ Maak een pluginconfiguratie aan via **Admin → Plugins → Graph Mail Plugin**.
 | --- | --- | --- |
 | `authenticationPluginConfiguration` | Id van de Http Client Authentication-configuratie waarmee Graph Mail zich aanmeldt en waarvan hij de certificaten gebruikt. Zie [Aanmelden via Http Client Authentication](#aanmelden-via-http-client-authentication) | Aanbevolen; anders de drie hieronder |
 | `tenantId`, `clientId`, `clientSecret` | **Verouderd.** Het aanmelden van 1.0, alleen gebruikt als `authenticationPluginConfiguration` leeg is. Zie [Verouderd: aanmelden met client secret](#verouderd-aanmelden-met-client-secret) | Alle drie, zonder verwijzing |
+| `baseUrl` | Graph API-URL, voor als Graph Mail niet rechtstreeks met Microsoft praat, bijv. via een gateway: `https://gateway.gemeente.nl/graph`. Alleen samen met `authenticationPluginConfiguration`; leeg: `graph-mail.http.graph-base-url`. Zie [Het Graph-endpoint](#het-graph-endpoint-deployment-instelling-met-een-graph-api-url-per-configuratie) | Nee |
 | `allowedSenders` | Whitelist van toegestane afzenders: kommagescheiden volledige adressen (`noreply@gemeente.nl`) en/of domein-entries (`@gemeente.nl`) | Ja |
 | `testSenderMailbox` | Standaard afzenderadres voor de test-send functie | Nee |
 
-Een configuratie heeft één van beide logins nodig; zonder wordt ze bij opslaan en deploy geweigerd. De Graph-endpoints en timeouts zijn **geen** pluginproperty. Ze staan onder `graph-mail.http` in
-`application.yml` — zie [Het Graph-endpoint is een deployment-instelling](#het-graph-endpoint-is-een-deployment-instelling-geen-pluginproperty) hieronder voor de reden.
+Een configuratie heeft één van beide logins nodig; zonder wordt ze bij opslaan en deploy geweigerd. De standaard Graph-endpoints en de timeouts zijn **geen** pluginproperty. Ze staan onder `graph-mail.http` in
+`application.yml`; alleen de Graph API-URL kan per configuratie (`baseUrl`) — zie
+[Het Graph-endpoint](#het-graph-endpoint-deployment-instelling-met-een-graph-api-url-per-configuratie) hieronder voor de reden.
 
 ### Afzender-whitelist (`allowedSenders`)
 
@@ -624,7 +626,7 @@ Wie deze sleutel én een databasedump bezit, kan alle plugin-secrets ontsleutele
 secret in Azure periodiek en behandel de encryptiesleutel met hetzelfde beveiligingsniveau als de
 secrets zelf.
 
-### Het Graph-endpoint is een deployment-instelling, geen pluginproperty
+### Het Graph-endpoint: deployment-instelling, met een Graph API-URL per configuratie
 
 `graphBaseUrl` was eerder per pluginconfiguratie instelbaar vanuit de beheer-UI. Dat gaf een
 SSRF-primitief, en de hostcontrole op de upload-URL leidde haar verwachte host áf uit `graphBaseUrl`
@@ -633,6 +635,29 @@ SSRF-primitief, en de hostcontrole op de upload-URL leidde haar verwachte host �
 Het staat nu onder `graph-mail.http.graph-base-url` en wordt bij het opstarten gevalideerd tegen een
 vaste allowlist van Microsoft Graph-endpoints (inclusief de sovereign clouds). Een afwijkende waarde
 laat de applicatie falen bij opstarten met een leesbare melding.
+
+Sinds 1.2.0 kan een Graph Mail-configuratie daarnaast een eigen Graph API-URL zetten (`baseUrl`),
+zonder `application.yml`: voor als Graph Mail niet rechtstreeks met Microsoft praat, zoals via een
+gateway met een eigen URL of een stub in een testomgeving (wel https). Dat mag alleen samen met een Http Client
+Authentication-configuratie: wie die beheert, kan het token endpoint toch al overal heen laten wijzen,
+dus de property voegt geen nieuw pad toe voor het secret. Met het verouderde client-secret-aanmelden
+wordt ze geweigerd, omdat dat token van Microsoft komt en alleen naar Microsoft hoort te gaan.
+
+- **Controle** (`isValidBaseUrl`, bij opslaan, deployen en per verzending): https, een host,
+  geen user info, query of fragment. Geen allowlist: zo'n URL heeft per definitie een eigen host.
+  Dubbele slashes in het pad en een slash aan het eind worden weggehaald.
+- **Doorgifte.** `GraphMailLogin` zet de URL op `GraphMailAuthentication.graphBaseUrl`;
+  `GraphMailClientImpl` gebruikt die voor die verzending in plaats van `graph-base-url`. Zo blijft
+  `GraphMailClient` ongewijzigd.
+- **Uploadhosts.** Naast de uploadhosts van de cloud van `graph-base-url` accepteert de client dan
+  een upload-URL op precies de origin van die URL (scheme, host en poort), voor een gateway die de
+  upload-URL naar zichzelf herschrijft.
+- **Het beheerscherm** toont het veld alleen met een gekozen Http Client Authentication-configuratie,
+  controleert hetzelfde als de backend, en slaat het leeg op als je overstapt op het client secret
+  (Valtimo overschrijft niet-geheime properties met wat binnenkomt).
+- **Sleutel `baseUrl`**, zoals bij andere plugins (Xential, Suwinet, Public Task). Niet `graphBaseUrl`:
+  configuraties van 1.0.3 en ouder kunnen die nog bewaard hebben, en die wordt sinds 1.0.4 genegeerd.
+  Dezelfde sleutel zou die oude waarden weer laten meetellen.
 
 Het token endpoint van een Http Client Authentication-configuratie staat in die configuratie en wordt
 niet gecontroleerd. Wie pluginconfiguraties mag beheren, kan het dus naar een eigen host laten wijzen;
@@ -770,8 +795,9 @@ al zijn verkeer; het aanmelden doet Http Client Authentication er zelf mee.
   de standaard-CA's. Een gateway die het aanmelden en Graph doorlaat maar niet de uploadhosts
   (`*.office.com` e.d.), laat bijlagen vanaf 3 MB op een certificaatfout stuklopen.
 - **Endpoints.** Een transparante gateway laat de Microsoft-URL's ongemoeid; dan verandert er niets
-  aan `graph-mail.http`. Een gateway met een eigen URL wordt voor Graph in productie (nog) niet
-  geaccepteerd: `graph-base-url` moet een Microsoft-host zijn.
+  aan `graph-mail.http`. Een gateway met een eigen URL zet je in de Graph Mail-configuratie
+  (`baseUrl`, zie *[Het Graph-endpoint](#het-graph-endpoint-deployment-instelling-met-een-graph-api-url-per-configuratie)*); `graph-base-url`
+  blijft een Microsoft-host.
 - **Bijlagen.** Bijlagen van 3 MB of groter gaan in stukken van 3,2 MB; de gateway moet verzoeken
   van die grootte doorlaten (nginx staat standaard 1 MB toe: `client_max_body_size`).
 - **Het certificaat komt met de hele keten.** De JDK biedt een clientcertificaat alleen aan als de

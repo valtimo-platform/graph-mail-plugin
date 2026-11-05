@@ -2,6 +2,11 @@
 
 Overzicht van wijzigingen per versie van de Graph Mail-plugin.
 
+## 1.2.0
+
+Een Graph Mail-configuratie kan nu zelf de Graph API-URL instellen (**Graph API-URL**, `baseUrl`),
+bijvoorbeeld voor een gateway met een eigen adres. Zie de [handleiding](handleiding.md#via-een-gateway).
+
 ## 1.1.1
 
 Graph Mail accepteert nu elk authenticatietype van Http Client Authentication, niet alleen Token

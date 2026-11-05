@@ -20,6 +20,13 @@ internal const val AUTHENTICATION_PLUGIN_CONFIGURATION_PROPERTY = "authenticatio
 internal const val AUTHENTICATION_PLUGIN_CONFIGURATION_FIELD =
     "'Http Client Authentication configuration' ($AUTHENTICATION_PLUGIN_CONFIGURATION_PROPERTY)"
 
+internal const val BASE_URL_PROPERTY = "baseUrl"
+
+// How messages name the field: its label in the screen, and its key in *.pluginconfig.json.
+internal const val BASE_URL_FIELD = "'Graph API URL' ($BASE_URL_PROPERTY)"
+
+private val DOUBLED_SLASHES = Regex("/{2,}")
+
 // A configuration with neither login.
 internal const val NO_LOGIN_MESSAGE =
     "This Graph Mail configuration has no login: select an Http Client Authentication configuration in the field " +
@@ -50,12 +57,14 @@ private val RETRYABLE_LOGIN_STATUSES = setOf(408, 429)
  * certificates for the connection, null without them. [source] names the configuration they come from, for messages.
  * [rejected] is called with the headers Graph refused (401), so a login that caches its own token can drop it; it
  * returns whether the next [headers] fetches a fresh token, which the client then tries once. The Http Client
- * Authentication plugin keeps its cache to itself, so its login returns false.
+ * Authentication plugin keeps its cache to itself, so its login returns false. [graphBaseUrl] is the Graph API URL set
+ * in the Graph Mail configuration (e.g. a gateway), which goes with this login; null for `graph-mail.http.graph-base-url`.
  */
 class GraphMailAuthentication(
     val source: String,
     val sslContext: SSLContext?,
     val rejected: (HttpHeaders) -> Boolean = { false },
+    val graphBaseUrl: String? = null,
     val headers: () -> HttpHeaders,
 )
 
@@ -94,7 +103,9 @@ internal fun httpClientAuthenticationProblem(
  *   ([GraphMailClientSecretLogin]), so configurations from 1.x keep sending after an upgrade. Logged as deprecated.
  *
  * Only checks that the reference is an Http Client Authentication configuration, not its type or where its token
- * endpoint points: limiting where the secret can go is left to the network. The checks read the stored configuration,
+ * endpoint points: limiting where the secret can go is left to the network. The same goes for the Graph API URL
+ * (`baseUrl`): only with a reference, as whoever can set it can already point the token endpoint anywhere, and only
+ * its form is checked ([isValidBaseUrl]). The checks read the stored configuration,
  * so Graph Mail only needs the [HttpClientAuthenticator] interface, not the plugin class (which the Http Client Authentication
  * plugin generates at startup). That interface is only touched in [HttpClientAuthenticatorCalls], after
  * [httpClientAuthenticationProblem] found it.
@@ -112,12 +123,15 @@ class GraphMailLogin(
 
     /**
      * Checks the login on save and deploy, without network calls or loading certificates. [credentials] are the
-     * deprecated client-secret login, null when none of its properties is filled in.
+     * deprecated client-secret login, null when none of its properties is filled in. [baseUrl] is the Graph API URL
+     * of the configuration, null or blank for `graph-mail.http.graph-base-url`.
      */
     fun validate(
         reference: String?,
         credentials: GraphCredentials? = null,
+        baseUrl: String? = null,
     ) {
+        baseUrlOf(reference, baseUrl)
         if (reference.isNullOrBlank()) {
             checkNotNull(credentials) { NO_LOGIN_MESSAGE }
             clientSecretLogin.validate(credentials)
@@ -144,7 +158,9 @@ class GraphMailLogin(
     fun resolve(
         reference: String?,
         credentials: GraphCredentials? = null,
+        baseUrl: String? = null,
     ): GraphMailAuthentication {
+        val configuredUrl = baseUrlOf(reference, baseUrl)
         if (reference.isNullOrBlank()) {
             checkNotNull(credentials) { NO_LOGIN_MESSAGE }
             if (deprecationLogged.add("${credentials.tenantId}:${credentials.clientId}")) {
@@ -170,9 +186,36 @@ class GraphMailLogin(
                 )
             }
         val tokenEndpointHost = tokenEndpointHostOf(configuration.properties)
-        return GraphMailAuthentication(source, sslContext) {
+        return GraphMailAuthentication(source, sslContext, graphBaseUrl = configuredUrl) {
             headers(authenticator, source, tokenEndpointHost, sslContext != null)
         }
+    }
+
+    // The Graph API URL of the configuration without a trailing slash or doubled slashes in its path, or null for
+    // graph-mail.http.graph-base-url. Spring collapses a doubled slash when it builds the request URL anyway; doing it
+    // here keeps every comparison with that URL (e.g. naming the step of a gateway rejection) the same. Not with the
+    // client-secret login: its token is fetched from Microsoft, and should only go to Microsoft.
+    private fun baseUrlOf(
+        reference: String?,
+        baseUrl: String?,
+    ): String? {
+        val value = baseUrl?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        check(!reference.isNullOrBlank()) {
+            "The field $BASE_URL_FIELD is filled in, but no Http Client Authentication configuration is " +
+                "selected. A Graph API URL only works with one: select it in " +
+                "$AUTHENTICATION_PLUGIN_CONFIGURATION_FIELD, or empty the field."
+        }
+        check(isValidBaseUrl(value)) {
+            "The field $BASE_URL_FIELD ('$value') is not a usable URL: expected an https URL such as " +
+                "'https://gateway.example.nl/graph', without user info, query or fragment."
+        }
+        val uri = URI(value)
+        val path =
+            uri.rawPath
+                .orEmpty()
+                .replace(DOUBLED_SLASHES, "/")
+                .trimEnd('/')
+        return "${uri.scheme}://${uri.rawAuthority}$path"
     }
 
     private fun configurationOf(reference: String): PluginConfiguration {

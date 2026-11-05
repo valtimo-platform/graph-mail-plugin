@@ -147,6 +147,60 @@ class GraphMailLoginTest {
         verify(clientSecretLogin, never()).resolve(any())
     }
 
+    // ── The Graph API URL (baseUrl) ─────────────────────────────────────
+
+    @Test fun `without a Graph API URL the login has none, so the deployment's graph-base-url is used`() {
+        listOf(null, "", "  ").forEach { url -> assertNull(login.resolve(LOGIN_ID, null, url).graphBaseUrl) }
+    }
+
+    @Test fun `the Graph API URL goes with the login, without a trailing slash`() {
+        login.validate(LOGIN_ID, null, " https://gateway.example.nl/graph/ ")
+
+        val authentication = login.resolve(LOGIN_ID, null, "https://gateway.example.nl/graph/")
+        assertEquals("https://gateway.example.nl/graph", authentication.graphBaseUrl)
+    }
+
+    @Test fun `the Graph API URL keeps its path, with doubled slashes collapsed`() {
+        listOf(
+            "https://servicegateway.example.nl/mijninkomen/graph",
+            "https://servicegateway.example.nl//mijninkomen//graph/",
+        ).forEach { url ->
+            assertEquals(
+                "https://servicegateway.example.nl/mijninkomen/graph",
+                login.resolve(LOGIN_ID, null, url).graphBaseUrl,
+            )
+        }
+        val withPort = login.resolve(LOGIN_ID, null, "https://gw.example.nl:8443/")
+        assertEquals("https://gw.example.nl:8443", withPort.graphBaseUrl)
+    }
+
+    @Test fun `a Graph API URL needs an Http Client Authentication configuration`() {
+        listOf(
+            assertThrows<IllegalStateException> { login.validate(null, credentials, "https://gateway.example.nl") },
+            assertThrows<IllegalStateException> { login.resolve(null, credentials, "https://gateway.example.nl") },
+        ).forEach { ex ->
+            assertTrue(ex.message!!.contains(BASE_URL_PROPERTY), ex.message)
+            assertTrue(ex.message!!.contains("no Http Client Authentication configuration is selected"), ex.message)
+        }
+        verify(clientSecretLogin, never()).resolve(any())
+    }
+
+    @Test fun `a Graph API URL that is not a plain https URL is refused`() {
+        listOf(
+            "http://gateway.example.nl",
+            "gateway.example.nl",
+            "https://",
+            "https://user@gateway.example.nl",
+            "https://gateway.example.nl/graph?x=1",
+            "https://gateway.example.nl/graph#x",
+            "https://gateway.example.nl/gr aph",
+        ).forEach { url ->
+            val message = assertThrows<IllegalStateException> { login.validate(LOGIN_ID, null, url) }.message!!
+            assertTrue(message.contains("is not a usable URL"), "$url: $message")
+            assertThrows<IllegalStateException> { login.resolve(LOGIN_ID, null, url) }
+        }
+    }
+
     // ── Http Client Authentication is compileOnly ───────────────────────
 
     @Test fun `a reference without the Http Client Authentication plugin says to add it`() {
