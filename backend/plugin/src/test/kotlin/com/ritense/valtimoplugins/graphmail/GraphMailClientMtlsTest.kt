@@ -128,7 +128,8 @@ class GraphMailClientMtlsTest {
 
     // The login of an Http Client Authentication configuration with these certificates; its token request is that
     // plugin's own (tested there, and classified by GraphMailLogin).
-    private fun login(sslContext: SSLContext?) = GraphMailAuthentication(SOURCE, sslContext) { HttpHeaders().apply { setBearerAuth("token-1") } }
+    private fun login(sslContext: SSLContext?) =
+        GraphMailAuthentication(SOURCE, sslContext) { HttpHeaders().apply { setBearerAuth("token-1") } }
 
     // Sends as the plugin does with the client GraphMailAutoConfiguration builds.
     private fun send(
