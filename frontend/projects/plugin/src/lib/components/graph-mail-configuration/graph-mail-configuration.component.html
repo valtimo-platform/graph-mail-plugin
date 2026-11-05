@@ -46,7 +46,7 @@
       [disabled]="!!obs.disabled || !loginOptions"
       style="width: 100%; padding: 0 16px; border: none; border-bottom: 1px solid #8d8d8d;
              background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box; font-family: inherit"
-      [style.border-bottom]="loginSelectionUnknown || selectedLogin?.problem ? '2px solid #da1e28' : '1px solid #8d8d8d'"
+      [style.border-bottom]="loginSelectionUnknown ? '2px solid #da1e28' : '1px solid #8d8d8d'"
     >
       <option value="">{{ 'authenticationPluginConfigurationEmpty' | pluginTranslate: pluginId | async }}</option>
       <option *ngFor="let option of loginOptions ?? []" [value]="option.id">{{ option.title }}</option>
@@ -56,9 +56,6 @@
     </select>
     <div style="margin: 6px 0 0; font-size: 12px; color: #525252">
       {{ 'authenticationPluginConfigurationTooltip' | pluginTranslate: pluginId | async }}
-    </div>
-    <div *ngIf="selectedLogin?.problem as problem" style="margin: 6px 0 0; font-size: 12px; color: #da1e28">
-      "{{ selectedLogin?.title }}": {{ problem | pluginTranslate: pluginId | async }}
     </div>
     <div *ngIf="loginSelectionUnknown" style="margin: 6px 0 0; font-size: 12px; color: #da1e28">
       {{ 'authenticationPluginConfigurationMissing' | pluginTranslate: pluginId | async }}

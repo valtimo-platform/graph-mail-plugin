@@ -228,7 +228,7 @@ describe('GraphMailPluginConfigurationComponent', () => {
     withStoredReference('login-1');
 
     expect(pluginManagementSpy.getPluginConfigurationsByCategory).toHaveBeenCalledWith('http-client-authentication');
-    expect(component.loginOptions).toEqual([{id: 'login-1', title: 'Graph login', problem: null}]);
+    expect(component.loginOptions).toEqual([{id: 'login-1', title: 'Graph login'}]);
     expect(component.loginConfigurationValue).toBe('login-1');
     expect(component.unknownLoginConfiguration).toBeNull();
   });
@@ -374,28 +374,22 @@ describe('GraphMailPluginConfigurationComponent', () => {
     expect(values[0].allowedSenders).toBe('noreply@gemeente.nl,ceo@gemeente.nl');
   });
 
-  it('says why a configuration cannot log in to Microsoft, and blocks saving', () => {
-    const cases: Array<[object, string]> = [
-      [{authenticationType: 'BEARER'}, 'loginNotTokenExchange'],
-      [{...entraLogin.properties, audience: 'haal-centraal'}, 'loginHasAudience'],
-      [{...entraLogin.properties, scope: ' '}, 'loginWithoutScope'],
+  it('accepts a configuration of every authentication type', () => {
+    const cases: Array<object> = [
+      {authenticationType: 'NONE'},
+      {authenticationType: 'BEARER'},
+      {authenticationType: 'HEADER', authHeaderName: 'X-Api-Key'},
+      {...entraLogin.properties, audience: 'graph'},
+      {...entraLogin.properties, scope: ' '},
     ];
-    cases.forEach(([properties, problem]) => {
+    cases.forEach(properties => {
       withStoredReference('other', [loginWith('other', properties)]);
       component.formValueChange({...baseFormValue});
 
-      expect(component.selectedLogin?.problem).withContext(problem).toBe(problem as any);
-      expect(validityOf(component)).withContext(problem).toBeFalse();
-      expect(component.testSectionVisible).withContext(problem).toBeFalse();
+      const context = JSON.stringify(properties);
+      expect(validityOf(component)).withContext(context).toBeTrue();
+      expect(component.testSectionVisible).withContext(context).toBeTrue();
     });
-  });
-
-  it('accepts a blank audience as no audience', () => {
-    withStoredReference('other', [loginWith('other', {...entraLogin.properties, audience: ''})]);
-    component.formValueChange({...baseFormValue});
-
-    expect(component.selectedLogin?.problem).toBeNull();
-    expect(validityOf(component)).toBeTrue();
   });
 
   it('offers nothing, without failing, when the configurations cannot be loaded', () => {
@@ -428,7 +422,7 @@ describe('GraphMailPluginConfigurationComponent', () => {
     expect(values[0].authenticationPluginConfiguration).toBe('login-1');
   });
 
-  it('checks the selected login when the configurations arrive after the prefill', () => {
+  it('accepts the selected login when the configurations arrive after the prefill', () => {
     const options$ = new Subject<Array<any>>();
     pluginManagementSpy.getPluginConfigurationsByCategory.and.returnValue(options$);
     component = createComponent();
@@ -438,10 +432,9 @@ describe('GraphMailPluginConfigurationComponent', () => {
     component.ngOnInit();
     component.formValueChange({...baseFormValue});
 
-    options$.next([loginWith('other', {...entraLogin.properties, audience: 'haal-centraal'})]);
+    options$.next([loginWith('other', {authenticationType: 'BEARER'})]);
 
-    expect(component.selectedLogin?.problem).toBe('loginHasAudience');
-    expect(validityOf(component)).toBeFalse();
+    expect(validityOf(component)).toBeTrue();
   });
 
   it('marks a stored reference unknown when the configurations arrive after the prefill', () => {
@@ -576,12 +569,6 @@ describe('GraphMailPluginConfigurationComponent', () => {
       const {element} = await render('login-1', [entraLogin], true);
 
       expect((element.querySelector('select') as HTMLSelectElement).disabled).toBeTrue();
-    });
-
-    it('says under the select what to change in the selected configuration', async () => {
-      const {element} = await render('other', [loginWith('other', {...entraLogin.properties, audience: 'haal-centraal'})]);
-
-      expect(element.textContent).toContain('"other": loginHasAudience');
     });
   });
 });

@@ -199,7 +199,7 @@ class GraphMailClientImpl(
         // recipient a duplicate message when it lands wrong. Only set this for steps that are
         // provably repeatable: draft creation and upload-session creation.
         retryOnTransportError: Boolean,
-        request: (authorization: String, clientRequestId: String) -> T,
+        request: (headers: HttpHeaders, clientRequestId: String) -> T,
     ): T {
         var attempt = 0
         var backoffMs = INITIAL_BACKOFF_MS
@@ -213,9 +213,9 @@ class GraphMailClientImpl(
                 )
             }
             attempt++
-            val authorization =
+            val headers =
                 try {
-                    authentication.authorization()
+                    authentication.headers()
                 } catch (ex: GraphMailRetryableException) {
                     // Nothing was sent to Graph yet, so this is safe to retry for every step.
                     if (attempt >= MAX_RETRIES) throw ex
@@ -237,7 +237,7 @@ class GraphMailClientImpl(
             // request, and a retry is a different request on their side too.
             val clientRequestId = UUID.randomUUID().toString()
             try {
-                return request(authorization, clientRequestId)
+                return request(headers, clientRequestId)
             } catch (ex: HttpClientErrorException) {
                 when (ex.statusCode.value()) {
                     // Tried once more with a fresh token when the login can fetch one (the client-secret login drops
@@ -246,7 +246,7 @@ class GraphMailClientImpl(
                     // keeps its token, so there the 401 is final; a revoked token expires within the hour.
                     401 -> {
                         val ids = correlation(clientRequestId, ex.responseHeaders)
-                        if (!retriedWithFreshToken && authentication.rejected(authorization)) {
+                        if (!retriedWithFreshToken && authentication.rejected(headers)) {
                             retriedWithFreshToken = true
                             logger.warn(
                                 "Graph refused the token of {} during {} (401) {} — retrying once with a fresh token",
@@ -627,11 +627,11 @@ class GraphMailClientImpl(
                     .fromUriString("$graphBaseUrl/v1.0/users/{mailbox}/messages/{id}")
                     .buildAndExpand(senderMailbox, draftId)
                     .toUri()
-            val authorization = authentication.authorization()
+            val headers = authentication.headers()
             restClient
                 .delete()
                 .uri(uri)
-                .header(HttpHeaders.AUTHORIZATION, authorization)
+                .headers { it.addAll(headers) }
                 .retrieve()
                 .toBodilessEntity()
             logger.debug("Orphaned draft deleted id={}", draftId)
@@ -662,11 +662,11 @@ class GraphMailClientImpl(
             // Safe to retry: a duplicate draft is invisible to the recipient, and an orphan is
             // cleaned up by deleteDraftBestEffort.
             retryOnTransportError = true,
-        ) { authorization, clientRequestId ->
+        ) { headers, clientRequestId ->
             restClient
                 .post()
                 .uri(uri)
-                .header(HttpHeaders.AUTHORIZATION, authorization)
+                .headers { it.addAll(headers) }
                 .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(message)
@@ -709,11 +709,11 @@ class GraphMailClientImpl(
             // Safe to retry: the draft has not been sent, and a duplicate attachment on a draft that
             // is discarded on failure costs nothing a recipient can see.
             retryOnTransportError = true,
-        ) { authorization, clientRequestId ->
+        ) { headers, clientRequestId ->
             restClient
                 .post()
                 .uri(uri)
-                .header(HttpHeaders.AUTHORIZATION, authorization)
+                .headers { it.addAll(headers) }
                 .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
@@ -755,11 +755,11 @@ class GraphMailClientImpl(
                 permissionHint = "Mail.ReadWrite",
                 // Safe to retry: creating a second upload session has no user-visible effect.
                 retryOnTransportError = true,
-            ) { authorization, clientRequestId ->
+            ) { headers, clientRequestId ->
                 restClient
                     .post()
                     .uri(uri)
-                    .header(HttpHeaders.AUTHORIZATION, authorization)
+                    .headers { it.addAll(headers) }
                     .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
@@ -1000,11 +1000,11 @@ class GraphMailClientImpl(
             permissionHint = "Mail.Send",
             // NOT safe to retry: the draft may already have been accepted for delivery.
             retryOnTransportError = false,
-        ) { authorization, clientRequestId ->
+        ) { headers, clientRequestId ->
             restClient
                 .post()
                 .uri(uri)
-                .header(HttpHeaders.AUTHORIZATION, authorization)
+                .headers { it.addAll(headers) }
                 .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                 .contentLength(0)
                 .retrieve()
@@ -1028,11 +1028,11 @@ class GraphMailClientImpl(
             permissionHint = "Mail.Send",
             // NOT safe to retry: Graph may already have queued the message for delivery.
             retryOnTransportError = false,
-        ) { authorization, clientRequestId ->
+        ) { headers, clientRequestId ->
             restClient
                 .post()
                 .uri(url)
-                .header(HttpHeaders.AUTHORIZATION, authorization)
+                .headers { it.addAll(headers) }
                 .header(CLIENT_REQUEST_ID_HEADER, clientRequestId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(payload)

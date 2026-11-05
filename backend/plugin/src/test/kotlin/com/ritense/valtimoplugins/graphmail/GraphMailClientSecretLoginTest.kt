@@ -175,7 +175,7 @@ class GraphMailClientSecretLoginTest {
                 .willReturn(aResponse().withStatus(401).withBody("""{"error":"invalid_client","echo":"secret-1"}""")),
         )
 
-        val ex = assertThrows<GraphMailPermanentException> { login.resolve(null, credentials).authorization() }
+        val ex = assertThrows<GraphMailPermanentException> { login.resolve(null, credentials).headers() }
 
         assertEquals(401, ex.statusCode)
         assertTrue(ex.message!!.contains("check tenantId, clientId and clientSecret"), ex.message)
@@ -189,7 +189,7 @@ class GraphMailClientSecretLoginTest {
             wireMock.resetAll()
             wireMock.stubFor(post(urlPathEqualTo(TOKEN_PATH)).willReturn(aResponse().withStatus(status)))
 
-            val ex = assertThrows<GraphMailRetryableException> { login.resolve(null, credentials).authorization() }
+            val ex = assertThrows<GraphMailRetryableException> { login.resolve(null, credentials).headers() }
 
             assertEquals(status, ex.statusCode)
         }

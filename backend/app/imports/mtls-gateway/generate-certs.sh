@@ -62,7 +62,7 @@ import json, pathlib, sys
 certs = pathlib.Path(sys.argv[1])
 pem = lambda name: (certs / name).read_text()
 # Per configuration title: its certificates. The gateway's CA is trusted by all of them.
-# The other configurations ("Not a Graph login", "Microsoft direct") have no certificates.
+# The other configuration ("Microsoft direct") has no certificates.
 tls = {
     "Graph login via gateway": {"clientCertificate": pem("client.pem"), "clientPrivateKey": pem("client-key.pem")},
     "Graph login without client certificate": {},

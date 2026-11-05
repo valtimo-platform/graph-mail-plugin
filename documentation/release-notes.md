@@ -2,6 +2,11 @@
 
 Overzicht van wijzigingen per versie van de Graph Mail-plugin.
 
+## 1.1.1
+
+Graph Mail accepteert nu elk authenticatietype van Http Client Authentication, niet alleen Token
+exchange.
+
 ## 1.1.0
 
 Graph Mail kan zich bij Microsoft aanmelden via een configuratie van de plugin

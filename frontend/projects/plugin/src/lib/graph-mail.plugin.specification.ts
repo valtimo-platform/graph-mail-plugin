@@ -52,9 +52,6 @@ const graphMailPluginSpecification: PluginSpecification = {
       authenticationPluginConfigurationMissing:
         'De gekozen configuratie bestaat niet meer of is niet beschikbaar. Kies een andere om op te kunnen slaan.',
       authenticationPluginConfigurationUnknown: 'Onbekende configuratie',
-      loginNotTokenExchange: 'kies authenticatietype Token exchange om bij Microsoft aan te melden.',
-      loginHasAudience: 'laat Audience leeg: Microsoft Entra ID doet alleen client credentials, geen token exchange.',
-      loginWithoutScope: 'vul Scope in, bijvoorbeeld https://graph.microsoft.com/.default.',
       clientSecretLogin: 'Aanmelden met client secret (verouderd)',
       clientSecretLoginDeprecated:
         'Zonder Http Client Authentication-configuratie meldt Graph Mail zich aan met de Tenant ID, Client ID en ' +
@@ -109,9 +106,6 @@ const graphMailPluginSpecification: PluginSpecification = {
       authenticationPluginConfigurationMissing:
         'The selected configuration no longer exists or is not available. Select another one to save.',
       authenticationPluginConfigurationUnknown: 'Unknown configuration',
-      loginNotTokenExchange: 'select authentication type Token exchange to log in to Microsoft.',
-      loginHasAudience: 'leave Audience empty: Microsoft Entra ID only does client credentials, not a token exchange.',
-      loginWithoutScope: 'fill in Scope, e.g. https://graph.microsoft.com/.default.',
       clientSecretLogin: 'Log in with client secret (deprecated)',
       clientSecretLoginDeprecated:
         'Without an Http Client Authentication configuration, Graph Mail logs in with the Tenant ID, Client ID and ' +
