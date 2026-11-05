@@ -8,6 +8,9 @@ interface GraphMailPluginConfig extends PluginConfigurationData {
   // Id of the Http Client Authentication configuration (any authentication type) whose headers and certificates
   // Graph Mail sends to Microsoft, or to a gateway in between.
   authenticationPluginConfiguration?: string;
+  // The Graph API URL, e.g. of a gateway with a URL of its own; used with authenticationPluginConfiguration. Empty: the
+  // deployment's graph-mail.http.graph-base-url (Microsoft).
+  baseUrl?: string;
   // The deprecated client-secret login of 1.x, used while authenticationPluginConfiguration is empty.
   tenantId?: string;
   clientId?: string;

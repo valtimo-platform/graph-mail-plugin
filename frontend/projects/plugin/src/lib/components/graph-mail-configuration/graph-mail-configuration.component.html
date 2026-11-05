@@ -35,9 +35,13 @@
   <div style="margin-bottom: 16px">
     <label
       for="graph-mail-authentication-plugin-configuration"
-      style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin-bottom: 8px; letter-spacing: .16px"
+      style="display: flex; align-items: center; font-size: 12px; color: #525252; margin-bottom: 8px; letter-spacing: .16px"
     >
       {{ 'authenticationPluginConfiguration' | pluginTranslate: pluginId | async }}
+      <v-tooltip-icon
+        [tooltip]="('authenticationPluginConfigurationTooltip' | pluginTranslate: pluginId | async) ?? ''"
+        [disabled]="!!obs.disabled"
+      ></v-tooltip-icon>
     </label>
     <select
       id="graph-mail-authentication-plugin-configuration"
@@ -54,9 +58,6 @@
         {{ 'authenticationPluginConfigurationUnknown' | pluginTranslate: pluginId | async }} ({{ unknownLoginConfiguration }})
       </option>
     </select>
-    <div style="margin: 6px 0 0; font-size: 12px; color: #525252">
-      {{ 'authenticationPluginConfigurationTooltip' | pluginTranslate: pluginId | async }}
-    </div>
     <div *ngIf="loginSelectionUnknown" style="margin: 6px 0 0; font-size: 12px; color: #da1e28">
       {{ 'authenticationPluginConfigurationMissing' | pluginTranslate: pluginId | async }}
     </div>
@@ -65,6 +66,35 @@
       style="margin: 6px 0 0; font-size: 12px; color: #525252"
     >
       {{ 'authenticationPluginConfigurationNone' | pluginTranslate: pluginId | async }}
+    </div>
+  </div>
+
+  <!-- The Graph API URL (baseUrl): only with a selected Http Client Authentication configuration. Native, as the
+       selection above; see baseUrlValue. -->
+  <div *ngIf="!clientSecretLoginShown" style="margin-bottom: 16px">
+    <label
+      for="graph-mail-base-url"
+      style="display: flex; align-items: center; font-size: 12px; color: #525252; margin-bottom: 8px; letter-spacing: .16px"
+    >
+      {{ 'baseUrl' | pluginTranslate: pluginId | async }}
+      <v-tooltip-icon
+        [tooltip]="('baseUrlTooltip' | pluginTranslate: pluginId | async) ?? ''"
+        [disabled]="!!obs.disabled"
+      ></v-tooltip-icon>
+    </label>
+    <input
+      id="graph-mail-base-url"
+      type="url"
+      [(ngModel)]="baseUrlValue"
+      (ngModelChange)="onLoginChange()"
+      [disabled]="!!obs.disabled"
+      placeholder="https://graph.microsoft.com"
+      style="width: 100%; padding: 0 16px; border: none; background: #f4f4f4; height: 40px; font-size: 14px;
+             box-sizing: border-box; font-family: inherit"
+      [style.border-bottom]="baseUrlInvalid ? '2px solid #da1e28' : '1px solid #8d8d8d'"
+    />
+    <div *ngIf="baseUrlInvalid" style="margin: 6px 0 0; font-size: 12px; color: #da1e28">
+      {{ 'baseUrlInvalidFormat' | pluginTranslate: pluginId | async }}
     </div>
   </div>
 
@@ -81,7 +111,7 @@
       {{ 'clientSecretLoginDeprecated' | pluginTranslate: pluginId | async }}
     </p>
 
-    <label for="graph-mail-tenant-id" style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin-bottom: 8px; letter-spacing: .16px">
+    <label for="graph-mail-tenant-id" style="display: block; font-size: 12px; color: #525252; margin-bottom: 8px; letter-spacing: .16px">
       {{ 'tenantId' | pluginTranslate: pluginId | async }}
     </label>
     <input
@@ -97,7 +127,7 @@
       {{ 'tenantIdInvalidFormat' | pluginTranslate: pluginId | async }}
     </div>
 
-    <label for="graph-mail-client-id" style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin: 12px 0 8px; letter-spacing: .16px">
+    <label for="graph-mail-client-id" style="display: block; font-size: 12px; color: #525252; margin: 12px 0 8px; letter-spacing: .16px">
       {{ 'clientId' | pluginTranslate: pluginId | async }}
     </label>
     <input
@@ -110,7 +140,7 @@
              background: #f4f4f4; height: 40px; font-size: 14px; box-sizing: border-box; font-family: inherit"
     />
 
-    <label for="graph-mail-client-secret" style="display: block; font-size: 12px; font-weight: 600; color: #525252; margin: 12px 0 8px; letter-spacing: .16px">
+    <label for="graph-mail-client-secret" style="display: block; font-size: 12px; color: #525252; margin: 12px 0 8px; letter-spacing: .16px">
       {{ 'clientSecret' | pluginTranslate: pluginId | async }}
     </label>
     <input
@@ -131,10 +161,10 @@
     *ngIf="testSectionVisible"
     style="margin-top: 28px; border: 1px solid #e0e0e0; border-radius: 6px; padding: 18px 20px"
   >
-    <strong style="font-size: 14px; display: block; margin-bottom: 4px">{{ 'testMailTitle' | pluginTranslate: pluginId | async }}</strong>
-    <p style="font-size: 13px; color: #666; margin: 0 0 16px; line-height: 1.5">
-      {{ 'testMailDescription' | pluginTranslate: pluginId | async }}
-    </p>
+    <strong style="font-size: 14px; display: flex; align-items: center; margin-bottom: 16px">
+      {{ 'testMailTitle' | pluginTranslate: pluginId | async }}
+      <v-tooltip-icon [tooltip]="('testMailDescription' | pluginTranslate: pluginId | async) ?? ''"></v-tooltip-icon>
+    </strong>
 
     <!-- Niet-opgeslagen configuratie: testmail werkt alleen na opslaan -->
     <div
@@ -154,7 +184,7 @@
 
     <!-- Afzender e-mailadres -->
     <div style="margin-bottom: 14px">
-      <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px">
+      <label style="display: block; font-size: 12px; color: #525252; margin-bottom: 8px; letter-spacing: .16px">
         {{ 'testSenderMailbox' | pluginTranslate: pluginId | async }}
       </label>
       <input
@@ -171,7 +201,7 @@
 
     <div style="display: flex; gap: 10px; align-items: flex-end">
       <div style="flex: 1">
-        <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px">
+        <label style="display: block; font-size: 12px; color: #525252; margin-bottom: 8px; letter-spacing: .16px">
           {{ 'testRecipientLabel' | pluginTranslate: pluginId | async }}
         </label>
         <input

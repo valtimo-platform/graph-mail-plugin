@@ -20,6 +20,23 @@ internal fun isValidResourceId(value: String): Boolean {
 
 internal fun isValidEmail(value: String) = value.length <= 254 && !value.contains("..") && EMAIL_REGEX.matches(value)
 
+/**
+ * The Graph API URL (`baseUrl`) of a Graph Mail configuration, e.g. of a gateway: an https URL with a host and at most
+ * a path, which the Graph paths (`/v1.0/users/...`) are appended to. https only, as every request carries the login's
+ * headers. No user info, query or fragment: appending a path would put the Graph path inside those rather than after
+ * the path.
+ */
+internal fun isValidBaseUrl(value: String): Boolean {
+    if (value.isBlank() || value.length > 2048) return false
+    if (value.any { it.isWhitespace() || it.isISOControl() }) return false
+    val uri = runCatching { java.net.URI(value) }.getOrNull() ?: return false
+    return uri.scheme.equals("https", ignoreCase = true) &&
+        !uri.host.isNullOrEmpty() &&
+        uri.rawUserInfo == null &&
+        uri.rawQuery == null &&
+        uri.rawFragment == null
+}
+
 // Characters that would change the shape of the token request rather than name a tenant.
 // tenantId is interpolated into the token URL path (/{tenantId}/oauth2/v2.0/token), so a '/'
 // adds a path segment, '?' starts a query string and '#' truncates the path.

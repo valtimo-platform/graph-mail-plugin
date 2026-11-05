@@ -8,7 +8,7 @@ import {
   PluginManagementService,
   PluginTranslatePipeModule,
 } from '@valtimo/plugin';
-import {FormModule, InputModule} from '@valtimo/components';
+import {FormModule, InputModule, TooltipIconModule} from '@valtimo/components';
 import {ConfigService} from '@valtimo/shared';
 import {BehaviorSubject, combineLatest, Observable, of, Subscription, take} from 'rxjs';
 import {catchError, filter, map, switchMap} from 'rxjs/operators';
@@ -30,7 +30,7 @@ interface TestSendStatus {
   selector: 'valtimo-graph-mail-configuration',
   templateUrl: './graph-mail-configuration.component.html',
   standalone: true,
-  imports: [CommonModule, FormsModule, PluginTranslatePipeModule, FormModule, InputModule],
+  imports: [CommonModule, FormsModule, PluginTranslatePipeModule, FormModule, InputModule, TooltipIconModule],
 })
 export class GraphMailPluginConfigurationComponent
   implements PluginConfigurationComponent, OnInit, OnDestroy
@@ -78,6 +78,10 @@ export class GraphMailPluginConfigurationComponent
   // saved, as the backend would refuse it.
   unknownLoginConfiguration: string | null = null;
   private storedLoginConfiguration = '';
+
+  // The Graph API URL (baseUrl); only shown, and saved, with a selected Http Client Authentication configuration. A
+  // native input outside v-form, like the selection it belongs to.
+  baseUrlValue = '';
 
   private loginSubscription: Subscription | undefined;
   private prefillSubscription: Subscription | undefined;
@@ -133,6 +137,7 @@ export class GraphMailPluginConfigurationComponent
               ...formValue,
               testSenderMailbox: this.testSenderMailbox || undefined,
               authenticationPluginConfiguration: this.loginConfigurationValue,
+              baseUrl: this.baseUrlSaved(),
               ...this.clientSecretLoginValue(),
             });
           }
@@ -149,6 +154,7 @@ export class GraphMailPluginConfigurationComponent
             this.testSenderMailbox = config?.testSenderMailbox ?? '';
             this.storedLoginConfiguration = config?.authenticationPluginConfiguration ?? '';
             this.loginConfigurationValue = this.storedLoginConfiguration;
+            this.baseUrlValue = config?.baseUrl ?? '';
             this.clientSecretTenantId = config?.tenantId ?? '';
             this.clientSecretClientId = config?.clientId ?? '';
             this.clientSecretValue = '';
@@ -245,6 +251,33 @@ export class GraphMailPluginConfigurationComponent
     return !this.loginConfigurationValue;
   }
 
+  get baseUrlInvalid(): boolean {
+    const value = this.baseUrlValue.trim();
+    return (
+      !this.clientSecretLoginShown &&
+      !!value &&
+      !GraphMailPluginConfigurationComponent.isValidBaseUrl(value)
+    );
+  }
+
+  // Aligned with isValidBaseUrl in GraphMailValidation.kt: an https URL with a host and at most a path.
+  private static isValidBaseUrl(value: string): boolean {
+    if (/\s/.test(value) || value.includes('?') || value.includes('#')) return false;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && !!url.hostname && !url.username && !url.password;
+    } catch {
+      return false;
+    }
+  }
+
+  // Cleared without a selection: Valtimo overwrites properties that are not secret with what is saved, and the
+  // backend refuses a Graph API URL with the client-secret login.
+  private baseUrlSaved(): string | undefined {
+    if (this.clientSecretLoginShown) return undefined;
+    return this.baseUrlValue.trim() || undefined;
+  }
+
   get tenantIdInvalid(): boolean {
     return (
       !!this.clientSecretTenantId &&
@@ -321,6 +354,7 @@ export class GraphMailPluginConfigurationComponent
       formValue.configurationTitle &&
       formValue.allowedSenders &&
       !this.allowedSendersInvalid &&
+      !this.baseUrlInvalid &&
       loginUsable
     );
     this.valid$.next(valid);

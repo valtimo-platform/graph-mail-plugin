@@ -174,6 +174,18 @@ class GraphMailPluginTest {
         verify(login).validate(LOGIN_ID, null)
     }
 
+    @Test fun `the Graph API URL is checked on save and goes with the login of a send`() {
+        plugin.baseUrl = "https://gateway.example.nl/graph"
+        whenever(login.resolve(LOGIN_ID, null, "https://gateway.example.nl/graph")).thenReturn(graphLogin)
+
+        plugin.checkConfiguration()
+        send()
+
+        verify(login).validate(LOGIN_ID, null, "https://gateway.example.nl/graph")
+        verify(login).resolve(LOGIN_ID, null, "https://gateway.example.nl/graph")
+        verify(mailClient).sendMail(eq(graphLogin), any())
+    }
+
     @Test fun `a 1x configuration is checked with its own client secret, not refused`() {
         plugin.apply {
             authenticationPluginConfiguration = null

@@ -53,10 +53,9 @@ herinnering — als het secret verloopt, stopt het versturen van mail met een aa
 
 ## Stap 1 — Aanmelden bij Microsoft: een Http Client Authentication-configuratie
 
-Graph Mail meldt zich bij Microsoft aan via een configuratie van de plugin **Http Client
-Authentication**. Daar staan de Client ID, het secret en, als je via een gateway gaat, de
-certificaten; zo beheer je ze op één plek. Ga naar **Admin → Plugins**, kies **Http Client
-Authentication** en maak een configuratie aan:
+Graph Mail regelt het aanmelden niet zelf, maar gebruikt daarvoor een configuratie van de plugin
+**Http Client Authentication**. Zo staan de Client ID, het secret en eventuele certificaten op één
+plek. Ga naar **Admin → Plugins**, kies **Http Client Authentication** en maak een configuratie aan:
 
 | Veld | Wat je invult |
 | --- | --- |
@@ -65,16 +64,13 @@ Authentication** en maak een configuratie aan:
 | **Token endpoint URL** | `https://login.microsoftonline.com/<Directory (tenant) ID>/oauth2/v2.0/token` |
 | **Client ID** | De Application (client) ID |
 | **Client secret** | Het secret van de beheerder. Wordt versleuteld opgeslagen; je kunt hem na opslaan niet meer uitlezen. |
-| **Audience** | **Leeg laten.** Microsoft vraagt alleen om het secret (client credentials), niet om een token exchange. |
+| **Audience** | **Leeg laten.** |
 | **Scope** | `https://graph.microsoft.com/.default` |
 
-Loopt het verkeer naar Microsoft via een gateway met clientcertificaat, vul dan in dezelfde
-configuratie ook de certificaten in; zie *Via een gateway met clientcertificaat* hieronder.
-
-Graph Mail accepteert elk authenticatietype van Http Client Authentication en stuurt alle headers
-mee die de configuratie geeft. Meldt een gateway zelf bij Microsoft aan, kies dan het type dat de
-gateway verwacht (bijvoorbeeld *Header* met een API-sleutel, of *None* als alleen het
-clientcertificaat telt).
+Loopt het verkeer naar Microsoft via een gateway van je organisatie, dan vul je hier vaak iets
+anders in: zo'n gateway meldt zich soms zelf bij Microsoft aan. Vraag de beheerder van de gateway
+welk **Authenticatie type** en welke gegevens je invult, en of er certificaten nodig zijn. Zie *Via
+een gateway* hieronder.
 
 ## Stap 2 — Graph Mail-configuratie aanmaken
 
@@ -85,9 +81,11 @@ Ga naar **Admin → Plugins**, kies **Microsoft Graph Mail** en maak een nieuwe 
 | **Configuratienaam** | Vrije naam waaronder je deze configuratie terugvindt bij het koppelen aan een proces, bijv. `Graph Mail productie`. |
 | **Toegestane afzenders** | Verplicht. De mailboxen waaruit deze configuratie mag versturen. Zie *Toegestane afzenders* hieronder. |
 | **Http Client Authentication-configuratie** | Aanbevolen. De configuratie uit stap 1. Zie *Bestaande configuraties met client secret* hieronder als je die (nog) niet gebruikt. |
+| **Graph API-URL** | Optioneel; verschijnt zodra je een Http Client Authentication-configuratie kiest. Meestal leeg laten. Alleen invullen als Graph Mail niet rechtstreeks met Microsoft praat, bijvoorbeeld via een gateway van je organisatie; zie *Via een gateway* hieronder. |
 | **Afzender testmail (e-mailadres)** | Optioneel. Het afzenderadres dat standaard wordt voorgesteld bij de testmail hieronder. Heeft geen invloed op het versturen vanuit processen. |
 
-Of de gekozen configuratie zich bij Microsoft kan aanmelden, blijkt pas bij de testmail (stap 3).
+Bij een aantal velden staat een ⓘ: ga erop staan voor een korte uitleg. Of de gekozen configuratie
+zich bij Microsoft kan aanmelden, blijkt pas bij de testmail (stap 3).
 
 Je kunt meerdere Graph Mail-configuraties naast elkaar aanmaken, bijvoorbeeld één per afdeling of
 per tenant. Bij het koppelen aan een processtap kies je welke je gebruikt.
@@ -116,31 +114,33 @@ Je vult volledige adressen in (`noreply@gemeente.nl`), hele domeinen (`@gemeente
 combinatie daarvan, gescheiden door komma's. Hoofdletters maken niet uit. Een domein-entry dekt geen
 subdomeinen: `@gemeente.nl` staat `post@gemeente.nl` toe, maar niet `post@mail.gemeente.nl`.
 
-De machtiging die je beheerder in Azure heeft gegeven geldt voor de hele tenant: technisch kan de
-plugin namens elke mailbox mailen. Deze lijst is de grens die dat in de plugin inperkt. Wie
-pluginconfiguraties mag beheren, kan de lijst aanpassen; begrens de mailboxen daarom ook in Microsoft
-365, met een Exchange Online Application Access Policy.
+De machtiging die je beheerder in Azure heeft gegeven, geldt voor álle mailboxen van je organisatie.
+Deze lijst zorgt dat Graph Mail alleen de mailboxen gebruikt die je hier noemt. Wil je dat ook aan
+de kant van Microsoft vastleggen, vraag je Microsoft 365-beheerder dan om de app tot die mailboxen
+te beperken (een *Application Access Policy*).
 
-### Via een gateway met clientcertificaat (mTLS)
+### Via een gateway
 
-Sommige organisaties laten uitgaand verkeer naar Microsoft via een eigen gateway lopen die alleen
-verbindingen met een geldig **clientcertificaat** doorlaat. De certificaten staan in dezelfde
-Http Client Authentication-configuratie als het aanmelden (stap 1):
+Sommige organisaties laten het verkeer naar Microsoft via een eigen gateway lopen. Wat je dan
+invult, hangt af van die gateway; vraag het na bij de beheerder ervan. Twee dingen kunnen spelen,
+los of samen.
 
-- **Clientcertificaat (PEM)** en de bijbehorende **private key**. Neem de hele keten op: het
-  clientcertificaat gevolgd door eventuele tussenliggende certificaten. Een certificaat zonder de
-  keten die de gateway kent, wordt niet eens aangeboden.
-- **Servercertificaat (PEM):** het (CA-)certificaat waarmee het certificaat van de gateway is
-  ondertekend.
-- In plaats van PEM kan ook een keystore- en truststore-bestand.
+**De gateway vraagt om een certificaat.** Vul in de Http Client Authentication-configuratie (stap 1)
+de certificaten in die je van de gateway-beheerder krijgt:
 
-De certificaten gelden voor al het verkeer van Graph Mail: het aanmelden bij Microsoft, het
-versturen en het uploaden van grote bijlagen. Zonder certificaten verbindt Graph Mail rechtstreeks.
+- **Clientcertificaat** en de bijbehorende **private key**: hiermee maakt Valtimo zich bekend bij de
+  gateway. Vraag om het certificaat inclusief eventuele tussenliggende certificaten.
+- **Servercertificaat**: hiermee herkent Valtimo de gateway.
 
-**Bijlagen van 3 MB en groter** gaan via een upload-URL die Graph teruggeeft. De gateway moet die
-URL herschrijven naar zichzelf en de upload doorsturen; anders faalt zo'n verzending met *"Upload URL
-returned by the Graph API failed host validation"*. Of de gateway de certificaten accepteert, blijkt
-bij de testmail (stap 3).
+**De gateway heeft een eigen adres.** Vul dat in bij **Graph API-URL** in de Graph
+Mail-configuratie (stap 2), bijvoorbeeld `https://gateway.gemeente.nl/graph`. Het adres begint met
+`https://`. Laat je het veld leeg, dan gaat de mail zoals voorheen rechtstreeks naar Microsoft.
+
+Controleer daarna met een testmail (stap 3) of het werkt. Verstuur vanuit een proces ook eens een
+mail met een **bijlage van 3 MB of meer**: die gaat via een andere route, en niet elke gateway laat
+die door. Mislukt zo'n mail terwijl kleine mails wel aankomen, neem dan contact op met de beheerder
+van de gateway. Voor die beheerder staan de technische details in
+[developer.md](developer.md#clientcertificaat-via-een-gateway-mtls).
 
 ## Stap 3 — Testmail versturen
 
@@ -239,9 +239,9 @@ privacygevoelige inhoud kan meesturen.
 **Blijft behouden:** koppen, vet en cursief, lijsten, tabellen, links, afbeeldingen met een
 `https`-adres of als bijlage ingesloten, en opmaak via `style`-attributen op elementen.
 
-**Wordt verwijderd:** scripts, iframes, losse `<style>`-blokken bovenaan het document,
-afbeeldingen die als `data:`-URI zijn ingebed, klik-acties op elementen, en afbeeldingen met een
-`http`-adres (zonder de **s**).
+**Wordt verwijderd:** scripts, ingesloten webpagina's, `<style>`-blokken bovenaan het document,
+afbeeldingen die in de HTML-tekst zelf zijn opgenomen, en afbeeldingen met een `http`-adres (zonder
+de **s**).
 
 Drie gevolgen voor wie templates maakt:
 
@@ -303,23 +303,14 @@ Reply-To-adressen tellen niet mee in het ontvangerstotaal — die krijgen de mai
 
 ## Goed om te weten
 
-**Dubbele mail wordt tegengehouden, maar niet onder alle omstandigheden.** Wordt de processtap door
-een technische storing opnieuw uitgevoerd nadat de mail al was aangenomen, dan herkent de plugin dat
-en verstuurt hij niet nog een keer. Je hoeft daar in het proces niets voor in te richten.
+**Dubbele mail wordt meestal tegengehouden.** Wordt een processtap na een storing opnieuw
+uitgevoerd terwijl de mail al verstuurd was, dan verstuurt de plugin hem niet nog een keer. Je hoeft
+daar niets voor in te richten. Waterdicht is het niet, bijvoorbeeld als de applicatie tussendoor is
+herstart. Kan een dubbele mail in jouw proces echt niet, overleg dan met je applicatiebeheerder.
 
-Die bescherming leeft in het geheugen van de server en houdt een verzending een half uur vast. Ze
-werkt daarom níet wanneer de applicatie op meerdere servers draait, wanneer de herhaling pas na een
-half uur komt, of wanneer de applicatie tussendoor is herstart. Gaat het om processen waar een
-dubbele mail echt niet kan, stem dat dan af met je beheerder — en laat de ontvangende partij
-daarnaast op dubbele berichten controleren, bijvoorbeeld via een kenmerk in het onderwerp.
-
-**Versturen kan even duren.** Een verzending duurt maximaal 30 seconden, of 2 minuten bij grote
-bijlagen, plus de tijd voor het aanmelden bij Microsoft. Begrenst Microsoft het verkeer tijdelijk,
-dan wacht de plugin hooguit twee seconden en geeft de verzending daarna terug aan Valtimo, die het
-later opnieuw inplant. Zo houdt één trage
-mailserver de rest van de procesverwerking niet op. Vraag je beheerder wel om op de mailstap een
-herhaalschema in te stellen; zonder dat valt Valtimo terug op zijn standaard, die voor deze situatie
-meestal te kort is.
+**Versturen kan even duren.** Is Microsoft tijdelijk druk, dan probeert Valtimo de mailstap later
+opnieuw. Vraag je applicatiebeheerder om voor de mailstap een herhaalschema in te stellen, zodat
+Valtimo het niet te snel opgeeft.
 
 **Log van verzendingen.** Elke verzending wordt vastgelegd, met e-mailadressen gedeeltelijk
 afgeschermd (`p***@patje.nl`) om onnodige verwerking van persoonsgegevens te voorkomen. Vraag je

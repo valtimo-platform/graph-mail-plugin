@@ -61,6 +61,12 @@ private val UPLOAD_HOSTS_PER_CLOUD =
  * are also genuinely deployment concerns rather than per-configuration ones: two plugin
  * configurations in the same GZAC instance have no reason to talk to different clouds.
  *
+ * A Graph API URL per configuration is the exception, for a gateway with a URL of its own: a Graph
+ * Mail configuration that logs in through an Http Client Authentication configuration can set it
+ * (`baseUrl`, see [GraphMailLogin]).
+ * It replaces [graphBaseUrl] for that configuration's sends; [graphBaseUrl] stays the default and
+ * keeps its allowlist.
+ *
  * `tokenBaseUrl` is only for the deprecated 1.x login (client secret in the Graph Mail
  * configuration), which POSTs the client secret to it as a form field: an admin-editable value
  * there was a way to walk off with the secret, which is why it is a deployment setting and checked

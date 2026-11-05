@@ -251,6 +251,13 @@ class GraphMailPlugin(
     @PluginProperty(key = AUTHENTICATION_PLUGIN_CONFIGURATION_PROPERTY, secret = false, required = false)
     var authenticationPluginConfiguration: String? = null
 
+    // The Graph API URL for when Graph Mail doesn't talk to Microsoft directly, e.g. a gateway with a URL of its own
+    // (https://gateway.example.nl/graph). Empty: the deployment's graph-mail.http.graph-base-url (Microsoft), as before. Only with an Http Client Authentication
+    // configuration, whose token endpoint an administrator can already point anywhere; see GraphMailLogin.
+    // A key of its own: configurations from 1.0.3 and older may still store a graphBaseUrl, which is ignored.
+    @PluginProperty(key = BASE_URL_PROPERTY, secret = false, required = false)
+    var baseUrl: String? = null
+
     // The deprecated 1.x login: only used when no Http Client Authentication configuration is selected, so that
     // configurations from 1.x — stored, or in a *.pluginconfig.json — keep sending after an upgrade. No longer
     // required, so a configuration with a reference can do without them.
@@ -282,12 +289,12 @@ class GraphMailPlugin(
     // itself: no network calls here. A 1.x configuration passes, as it did in 1.x; it is logged as deprecated.
     @PluginEvent(invokedOn = [EventType.CREATE, EventType.UPDATE])
     fun checkConfiguration() {
-        login.validate(authenticationPluginConfiguration, clientSecretCredentials())
+        login.validate(authenticationPluginConfiguration, clientSecretCredentials(), baseUrl)
     }
 
     // The login of one send; refused like on save when the Http Client Authentication configuration changed since.
     internal fun authentication(): GraphMailAuthentication =
-        login.resolve(authenticationPluginConfiguration, clientSecretCredentials())
+        login.resolve(authenticationPluginConfiguration, clientSecretCredentials(), baseUrl)
 
     // The deprecated client-secret login; null when none of its properties is filled in. Not trimmed, as in 1.x.
     private fun clientSecretCredentials(): GraphCredentials? {

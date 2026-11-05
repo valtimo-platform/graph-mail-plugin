@@ -52,6 +52,12 @@ const graphMailPluginSpecification: PluginSpecification = {
       authenticationPluginConfigurationMissing:
         'De gekozen configuratie bestaat niet meer of is niet beschikbaar. Kies een andere om op te kunnen slaan.',
       authenticationPluginConfigurationUnknown: 'Onbekende configuratie',
+      baseUrl: 'Graph API-URL (optioneel)',
+      baseUrlTooltip:
+        'Alleen invullen als Graph Mail niet rechtstreeks met Microsoft praat, bijvoorbeeld via een gateway ' +
+        'van je organisatie: https://gateway.gemeente.nl/graph. Leeg: Microsoft Graph, zoals ingesteld in de applicatie.',
+      baseUrlInvalidFormat:
+        'Vul een https-URL in, zonder gebruikersnaam, ? of #.',
       clientSecretLogin: 'Aanmelden met client secret (verouderd)',
       clientSecretLoginDeprecated:
         'Zonder Http Client Authentication-configuratie meldt Graph Mail zich aan met de Tenant ID, Client ID en ' +
@@ -106,6 +112,12 @@ const graphMailPluginSpecification: PluginSpecification = {
       authenticationPluginConfigurationMissing:
         'The selected configuration no longer exists or is not available. Select another one to save.',
       authenticationPluginConfigurationUnknown: 'Unknown configuration',
+      baseUrl: 'Graph API URL (optional)',
+      baseUrlTooltip:
+        'Only fill in when Graph Mail does not talk to Microsoft directly, e.g. through a gateway of your ' +
+        'organisation: https://gateway.organisation.gov/graph. Empty: Microsoft Graph, as configured in the application.',
+      baseUrlInvalidFormat:
+        'Enter an https URL, without a user name, ? or #.',
       clientSecretLogin: 'Log in with client secret (deprecated)',
       clientSecretLoginDeprecated:
         'Without an Http Client Authentication configuration, Graph Mail logs in with the Tenant ID, Client ID and ' +
